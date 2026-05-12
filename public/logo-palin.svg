@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 520" overflow="visible" role="img" aria-labelledby="title desc">
+  <title id="title">Logo Grupo Palin Martins</title>
+  <desc id="desc">Marca horizontal do Grupo Palin Martins.</desc>
+
+  <rect width="1760" height="520" fill="transparent"/>
+
+  <g transform="translate(6 18) scale(1.34)">
+    <path
+      d="M288 66 A168 168 0 0 0 20 160"
+      fill="none"
+      stroke="#a8922e"
+      stroke-linecap="butt"
+      stroke-width="26"
+    />
+    <path
+      d="M20 194 A168 168 0 1 0 288 78"
+      fill="none"
+      stroke="#f4f4f2"
+      stroke-linecap="butt"
+      stroke-width="26"
+    />
+
+    <path
+      d="M50 156 H125
+         C148 156 166 138 166 114
+         C166 91 148 73 125 73
+         H26"
+      fill="none"
+      stroke="#a8922e"
+      stroke-linecap="butt"
+      stroke-linejoin="round"
+      stroke-width="26"
+    />
+    <path
+      d="M64 156 V230"
+      fill="none"
+      stroke="#a8922e"
+      stroke-linecap="butt"
+      stroke-width="26"
+    />
+
+    <path
+      d="M168 230 V110 L232 178 L296 110 V230"
+      fill="none"
+      stroke="#f4f4f2"
+      stroke-linecap="butt"
+      stroke-linejoin="miter"
+      stroke-width="26"
+    />
+  </g>
+
+  <g fill="#f4f4f2">
+    <text
+      x="578"
+      y="404"
+      transform="rotate(-90 578 404)"
+      font-family="'Times New Roman', Georgia, serif"
+      font-size="92"
+      font-weight="700"
+      letter-spacing="5"
+    >
+      GRUPO
+    </text>
+
+    <text
+      x="690"
+      y="250"
+      font-family="'Times New Roman', Georgia, serif"
+      font-size="210"
+      font-weight="700"
+      letter-spacing="1.5"
+    >
+      PALIN
+    </text>
+
+    <text
+      x="680"
+      y="418"
+      font-family="'Times New Roman', Georgia, serif"
+      font-size="210"
+      font-weight="700"
+      letter-spacing="1.5"
+    >
+      MARTINS
+    </text>
+  </g>
+</svg>
