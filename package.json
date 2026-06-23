@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 80",
+    "dev:https": "next dev --experimental-https -H 0.0.0.0 -p 443",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -13,7 +14,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
     "@ai-sdk/openai": "^3.0.53",
-    "@anthropic-ai/sdk": "^0.90.0",
+    "@anthropic-ai/sdk": "^0.105.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.4",
     "ai": "^6.0.168",
@@ -37,9 +38,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.2.4",
-    "jest": "^30.4.2",
+    "jest": "^25.0.0",
     "tailwindcss": "^4",
-    "ts-jest": "^29.4.9",
+    "ts-jest": "^29.1.2",
     "typescript": "^5"
   }
 }

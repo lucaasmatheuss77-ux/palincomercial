@@ -15,9 +15,10 @@ interface Message {
 interface AgendaAssistantPanelProps {
   isOpen: boolean
   onClose: () => void
+  userId?: string | null  // passado pela page server-side para autenticar via IP local
 }
 
-export default function AgendaAssistantPanel({ isOpen, onClose }: AgendaAssistantPanelProps) {
+export default function AgendaAssistantPanel({ isOpen, onClose, userId }: AgendaAssistantPanelProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -53,7 +54,7 @@ export default function AgendaAssistantPanel({ isOpen, onClose }: AgendaAssistan
       const res = await fetch('/api/assistant/agenda', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, history })
+        body: JSON.stringify({ message: msg, history, userId: userId ?? undefined })
       })
       const data = await res.json()
       setMessages(prev => [...prev, {

@@ -968,6 +968,40 @@ export default function ClientesClient({
             </div>
 
             <div style={{ padding: '20px', overflowY: 'auto', display: 'grid', gap: '16px' }}>
+              {/* Prioridades / Ação Sugerida */}
+              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '10px', background: 'linear-gradient(135deg, rgba(34,197,94,0.1), rgba(15,23,42,0.96))', border: '1px solid rgba(34,197,94,0.3)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#22c55e', fontSize: '0.75rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  <Sparkles size={14} />
+                  Ação Sugerida / Prioridades
+                </div>
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  {selectedRow.clientStatusLabel === 'A vencer' && (
+                    <>
+                      <div style={{ color: '#f8fafc', fontSize: '0.85rem', fontWeight: 700 }}>1. Entrar em contato para renovação imediata (Contrato a vencer).</div>
+                      <div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>2. Agendar reunião de alinhamento de resultados.</div>
+                    </>
+                  )}
+                  {selectedRow.clientStatusLabel === 'Contrato pendente' && (
+                    <>
+                      <div style={{ color: '#f8fafc', fontSize: '0.85rem', fontWeight: 700 }}>1. Fazer follow-up para assinatura de contrato.</div>
+                      <div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>2. Oferecer suporte em dúvidas jurídicas ou de escopo.</div>
+                    </>
+                  )}
+                  {selectedRow.clientStatusLabel === 'Vencido' && (
+                    <>
+                      <div style={{ color: '#f8fafc', fontSize: '0.85rem', fontWeight: 700 }}>1. Investigar motivo da não renovação e tentar resgate.</div>
+                      <div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>2. Enviar proposta com novas condições.</div>
+                    </>
+                  )}
+                  {(selectedRow.clientStatusLabel === 'Contrato ativo' || selectedRow.clientStatusLabel === 'Cliente criado') && (
+                    <>
+                      <div style={{ color: '#f8fafc', fontSize: '0.85rem', fontWeight: 700 }}>1. Verificar satisfação e uso do serviço atual.</div>
+                      <div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>2. Identificar oportunidades de Cross-sell (Mix de Serviços).</div>
+                    </>
+                  )}
+                </div>
+              </div>
+
               <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '10px' }}>
                 <div style={{ color: '#94a3b8', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                   Resumo operacional

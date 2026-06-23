@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useCallback, type DragEvent } from 'react'
-import { Brain, CalendarDays, ChevronRight, ExternalLink, FileText, History, Mail, MessageSquare, Mic, Pencil, Phone, PhoneCall, Plus, Search, Sparkles, TimerReset, Trash2, Target, Wand2, X, Loader2 } from 'lucide-react'
+import Link from 'next/link'
+import { Brain, CalendarDays, ChevronRight, ExternalLink, FileText, History, Mail, MessageSquare, Mic, Pencil, Phone, PhoneCall, Plus, Search, Sparkles, TimerReset, Trash2, Target, Wand2, X, Loader2, UserSearch } from 'lucide-react'
 import { toast } from 'sonner'
 import { createMeeting } from '@/app/actions/agenda'
 import { updateLeadStage, createLead, updateLead, deleteLead } from '@/app/actions/pipeline'
@@ -1264,13 +1265,6 @@ export default function PipelineBoard({
 
   const kpis = [
     { 
-      label: 'Previsão Real', 
-      value: formatCompactCurrency(leads.reduce((sum, l) => sum + (l.value * (STAGE_PROBABILITY[l.stage] / 100)), 0)),
-      detail: 'Valor ponderado por probabilidade',
-      icon: Target,
-      color: 'var(--brand-primary)' 
-    },
-    { 
       label: 'Ações Hoje', 
       value: String(leads.filter(l => l.days === 0).length),
       detail: 'Leads com movimentação nas últimas 24h',
@@ -1377,6 +1371,28 @@ export default function PipelineBoard({
 
   return (
     <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+        <Link
+          href="/dashboard/perfil-cliente"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            background: 'var(--brand-primary)',
+            color: '#1e293b',
+            fontSize: '0.8rem',
+            fontWeight: 800,
+            textDecoration: 'none',
+            transition: 'opacity 0.2s',
+          }}
+        >
+          <UserSearch size={16} />
+          Perfil Cliente
+        </Link>
+      </div>
+
       {/* KPIs Section */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '32px' }}>
         {kpis.map((kpi) => (
@@ -1503,24 +1519,31 @@ export default function PipelineBoard({
                   const isOverdue = overdueDays > 0
                   const isWarning = !isOverdue && lead.days >= (CADENCE_DAYS[lead.stage] || 999) * 0.75
 
-                  const leadBorderColor = isOverdue
+                  const isUrgent = ['Proposta', 'Negociacao', 'Negociação'].includes(lead.stage || '')
+                  const leadBorderColor = isUrgent
+                    ? '#ef4444'
+                    : isOverdue
                     ? '#f59e0b'
                     : isAssistantRecommended
                       ? 'rgba(251,191,36,0.48)'
                       : isAssistantFocused
                         ? 'rgba(96,165,250,0.8)'
                         : 'var(--brand-border)'
-                  const leadBackground = isAssistantRecommended
+                  const leadBackground = isUrgent 
+                    ? 'linear-gradient(180deg, rgba(69,10,10,0.4), rgba(15,23,42,0.96))'
+                    : isAssistantRecommended
                     ? 'linear-gradient(180deg, rgba(44,38,14,0.96), rgba(15,23,42,0.96))'
                     : 'var(--brand-surface)'
-                  const leadShadow = isOverdue
+                  const leadShadow = isUrgent
+                    ? '0 0 15px rgba(239,68,68,0.4), 0 18px 36px rgba(2,6,23,0.15)'
+                    : isOverdue
                     ? '0 0 15px rgba(245,158,11,0.2), 0 18px 36px rgba(2,6,23,0.15)'
                     : isAssistantRecommended
                       ? '0 0 0 1px rgba(251,191,36,0.15), 0 20px 40px rgba(251,191,36,0.12)'
                       : isAssistantFocused
                         ? '0 0 0 1px rgba(96,165,250,0.15), 0 20px 40px rgba(2,6,23,0.12)'
                         : '0 18px 36px rgba(2,6,23,0.10)'
-                  const pulseClass = isOverdue ? 'pulse-amber-border' : ''
+                  const pulseClass = isUrgent ? 'pulse-red-border' : (isOverdue ? 'pulse-amber-border' : '')
                   return (
                     <div
                       id={`lead-card-${lead.id}`}
@@ -1530,14 +1553,14 @@ export default function PipelineBoard({
                       onDragStart={(e) => handleDragStart(e, lead.id)}
                       style={{
                         background: leadBackground,
-                        border: isOverdue ? '2px solid #f59e0b' : `1px solid ${leadBorderColor}`,
+                        border: isUrgent ? '2px solid #ef4444' : (isOverdue ? '2px solid #f59e0b' : `1px solid ${leadBorderColor}`),
                         borderRadius: '14px',
                         padding: '14px',
                         cursor: 'grab',
                         transition: 'all 0.2s',
                         boxShadow: leadShadow,
                         position: 'relative',
-                        zIndex: isOverdue ? 1 : 0,
+                        zIndex: isUrgent || isOverdue ? 1 : 0,
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.borderColor = isAssistantRecommended ? 'rgba(251,191,36,0.68)' : stageColors[stage]

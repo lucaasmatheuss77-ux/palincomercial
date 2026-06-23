@@ -1,46 +1,17 @@
-# Plano de Estabilização e Overhaul Premium (Web & Mobile)
+# Implementation Plan: Mobile Access & Purple Ban
 
-Este plano visa resolver a falha na celebração de vendas no Web, isolar completamente o ambiente Mobile e elevar o design para um nível "Premium State of the Art" usando o sistema UI/UX Pro Max.
+## 1. Mobile Access Fix (DevOps/Network)
+**Goal:** Allow the user to access the local development server (Next.js running on 0.0.0.0:80) from their mobile device.
 
-## Problemas Identificados
-1. **Confetes Web**: Falha no trigger do Supabase Realtime ou execução da biblioteca.
-2. **Isolamento Mobile**: O usuário não quer links do Mobile no Web Dashboard.
-3. **Design Mobile**: Necessidade de uma interface mais "viva", bonita e objetiva (estilo App nativo).
+**Steps:**
+- **Step 1.1:** Set up a secure tunnel using `npx localtunnel --port 80` to create a publicly accessible URL for the local server.
+- **Step 1.2:** Se a porta 80 estiver bloqueada pelo Firewall do Windows para conexões locais no celular, vou executar um script rápido para adicionar a permissão no Firewall (porta 80) permitindo acesso via Wi-Fi.
+- **Step 1.3:** Fornecer o link gerado ou o IP validado para o usuário abrir agora mesmo.
 
-## Agentes Envolvidos (Orquestração)
-1. `project-planner`: Coordenação e manutenção do plano.
-2. `backend-specialist`: Correção do trigger de confetes (Realtime) e validação de banco.
-3. `frontend-specialist`: Overhaul visual do Mobile e limpeza da UI Web.
-4. `test-engineer`: Verificação final de todos os fluxos.
+## 2. Removing Purple Colors (Frontend UI/UX)
+**Goal:** Enforce the design preferences by removing all purple/violet hues from the UI and replacing them with a suitable brand color palette (e.g., brand-primary, amber, slate).
 
-## Mudanças Propostas
-
-### 1. Celebração de Vendas (Web)
-- **Status**: [MODIFY] `src/app/dashboard/layout.tsx`
-- **Ação**: Refatorar o listener do Supabase Realtime para ser mais resiliente (reconexão automática e log de eventos).
-- **Ação**: Garantir que o `canvas-confetti` seja disparado corretamente no contexto do cliente.
-
-### 2. Isolamento do Ecossistema Mobile
-- **Status**: [MODIFY] `src/app/dashboard/layout.tsx`
-- **Ação**: Remover o item "Pocket CRM" da barra lateral do dashboard.
-- **Ação**: Garantir que `/mobile` seja o único ponto de entrada para consultores em campo.
-
-### 3. Overhaul "UI/UX Pro Max" (Mobile)
-- **Status**: [MODIFY] `src/app/dashboard/mobile-crm/mobile-client.tsx`
-- **Estilo**: Glassmorphism Futurista (Deep Spatial).
-- **Paleta**: Ocean Depth (#0f172a, #38bdf8, #10b981).
-- **Componentes**: 
-  - Cartões com blur dinâmico e bordas de gradiente sutil.
-  - Radar de Leads com scanner circular real (SVG animado).
-  - Feedback tátil visual (micro-interações ao clicar).
-
-## Cronograma de Execução
-1. **Fase 1**: Correção dos Confetes e Remoção de links (Backend/Frontend Foundation).
-2. **Fase 2**: Overhaul Visual do Pocket CRM (Frontend Premium).
-3. **Fase 3**: Testes de ponta a ponta e scripts de verificação (QA).
-
----
-
-## Você aprova este plano? (Y/N)
-- Y: Iniciar implementação paralela com os agentes.
-- N: Ajustar pontos específicos.
+**Steps:**
+- **Step 2.1:** Scan the codebase for Tailwind classes related to purple/violet (e.g., `bg-purple-*`, `text-violet-*`, `indigo-*`, `fuchsia-*`) and hex codes (como `#a855f7` e derivados).
+- **Step 2.2:** Systematically replace these classes and variables with the new primary/accent colors (tons de slate, blue ou amber para combinar com o padrão premium que construímos).
+- **Step 2.3:** Review UI components to ensure the new color scheme is consistent, premium, and fully devoid of purple.

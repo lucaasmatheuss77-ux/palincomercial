@@ -23,6 +23,7 @@ const MODULES = [
   { key: 'Eventos',       label: 'Eventos' },
   { key: 'Ranking',       label: 'Ranking' },
   { key: 'Relatorios',    label: 'Relatorios' },
+  { key: 'Planejamento',  label: 'Planej. Est.' },
   { key: 'Configuracoes', label: 'Configuracoes' },
 ]
 
@@ -407,7 +408,7 @@ function UserForm({
       }}>
         <AlertCircle size={15} color="#38bdf8" style={{ flexShrink: 0, marginTop: '1px' }} />
         <p style={{ color: 'var(--brand-muted)', fontSize: '0.78rem', margin: 0, lineHeight: 1.5 }}>
-          O usuário precisa ter uma conta ativa no Supabase para fazer login. Estas permissões controlam o que ele pode ver e fazer dentro do hub.
+          O acesso do novo usuário será criado automaticamente no sistema com a senha padrão <strong>Palin@123</strong>. As permissões abaixo definem o que ele poderá acessar.
         </p>
       </div>
 

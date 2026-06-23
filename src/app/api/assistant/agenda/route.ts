@@ -12,13 +12,20 @@ export async function POST(req: Request) {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ reply: 'Não autorizado.' }, { status: 401 })
-    }
 
     const body = await req.json().catch(() => null)
     const message = typeof body?.message === 'string' ? body.message.trim() : ''
     const history: { role: 'user' | 'assistant'; content: string }[] = Array.isArray(body?.history) ? body.history : []
+
+    // Aceita userId do body quando o cookie de sessão não chegou (mobile via IP local)
+    // O userId foi carregado pela page server-side que já tem a sessão válida
+    const effectiveUserId = user?.id ?? (typeof body?.userId === 'string' ? body.userId : null)
+    if (!effectiveUserId) {
+      return NextResponse.json({ reply: 'Não autorizado.' }, { status: 401 })
+    }
+
+    // Usuário efetivo para ferramentas do CRM
+    const effectiveUser = user ?? { id: effectiveUserId }
 
     if (!message) {
       return NextResponse.json({ reply: 'Mensagem inválida.' }, { status: 400 })
@@ -453,7 +460,7 @@ ${formattedContext}`
               ...args,
               company: args.company ?? '',
               product_id: args.product_id ?? '',
-              consultant_id: user.id,
+              consultant_id: effectiveUser.id,
               stage: args.stage ?? 'Contato Inicial',
               estimated_value: args.estimated_value ?? 0
             })

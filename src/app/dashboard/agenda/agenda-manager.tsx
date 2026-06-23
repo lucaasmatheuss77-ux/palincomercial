@@ -374,7 +374,9 @@ export default function AgendaManager({
             Nova Reunião
           </button>
           <a
-            href="#logistica"
+            href="https://palinos.vercel.app/frota"
+            target="_blank"
+            rel="noopener noreferrer"
             className="btn-accent"
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none', padding: '8px 14px', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 700 }}
           >

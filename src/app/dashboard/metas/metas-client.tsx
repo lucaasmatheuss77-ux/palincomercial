@@ -324,7 +324,7 @@ export default function MetasClient({
                     <td style={{ padding: '8px 10px', color: '#f59e0b', fontWeight: 700, textAlign: 'center' }}>{s.renovacoes}</td>
                     <td style={{ padding: '8px 10px', color: '#38bdf8', fontWeight: 700, textAlign: 'center' }}>{s.crossSells}</td>
                     <td style={{ padding: '8px 10px' }}>
-                      <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: isPipeline ? 'rgba(168,85,247,0.12)' : 'rgba(34,197,94,0.12)', color: isPipeline ? '#10b981' : '#22c55e', border: `1px solid ${isPipeline ? 'rgba(168,85,247,0.25)' : 'rgba(34,197,94,0.25)'}` }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: isPipeline ? 'rgba(59,130,246,0.12)' : 'rgba(34,197,94,0.12)', color: isPipeline ? '#3b82f6' : '#22c55e', border: `1px solid ${isPipeline ? 'rgba(59,130,246,0.25)' : 'rgba(34,197,94,0.25)'}` }}>
                         {s.creditos}
                       </span>
                     </td>

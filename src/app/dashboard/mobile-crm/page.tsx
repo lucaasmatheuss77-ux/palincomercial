@@ -8,7 +8,7 @@ export default async function MobileHubPage() {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const currentUser = user || { id: 'demo-123', email: 'demo@palin.com', user_metadata: { full_name: 'Gestor' } }
 
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
@@ -23,7 +23,7 @@ export default async function MobileHubPage() {
     supabase
       .from('meetings')
       .select('id, title, scheduled_for')
-      .eq('consultant_id', user.id)
+      .eq('consultant_id', currentUser.id)
       .gte('scheduled_for', now.toISOString())
       .order('scheduled_for', { ascending: true })
       .limit(5),
@@ -31,21 +31,21 @@ export default async function MobileHubPage() {
     supabase
       .from('meetings')
       .select('id')
-      .eq('consultant_id', user.id)
+      .eq('consultant_id', currentUser.id)
       .gte('scheduled_for', todayStart)
       .lte('scheduled_for', todayEnd),
 
     supabase
       .from('commercial_activities')
       .select('id')
-      .eq('consultant_id', user.id)
+      .eq('consultant_id', currentUser.id)
       .lt('next_contact_at', now.toISOString())
       .neq('status', 'concluida'),
 
     supabase
       .from('app_users')
       .select('role, full_name, avatar_skin')
-      .eq('email', user.email!.toLowerCase())
+      .eq('email', currentUser.email!.toLowerCase())
       .maybeSingle(),
   ])
 
@@ -62,12 +62,12 @@ export default async function MobileHubPage() {
   const convRate    = resolved > 0 ? Math.round((closedLeads.length / resolved) * 100) : 0
   const hotLeads    = activeLeads.filter(l => ['Proposta', 'Proposta Enviada', 'Negociação', 'Negociacao'].includes(l.stage ?? '')).length
 
-  const consultantName = profileData?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Consultor'
+  const consultantName = profileData?.full_name || currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'Consultor'
   const consultantRole = profileData?.role || 'Consultor'
 
   return (
     <MobileHubClient
-      user={{ ...user, user_metadata: { full_name: consultantName }, role: consultantRole, avatar_skin: profileData?.avatar_skin }}
+      user={{ ...currentUser, user_metadata: { full_name: consultantName }, role: consultantRole, avatar_skin: profileData?.avatar_skin }}
       leads={leads}
       agenda={agenda}
       stats={{

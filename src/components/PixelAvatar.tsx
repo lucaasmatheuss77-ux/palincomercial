@@ -27,7 +27,7 @@ const PALETTES: Record<AvatarSkin, { hair: string; skin: string; shirt: string; 
   2: { hair: '#2d4a2d', skin: '#c8956c', shirt: '#10b981', pants: '#064e3b', shoes: '#111', crown: '#fbbf24' },
   3: { hair: '#7c5c1a', skin: '#f4c28a', shirt: '#fbbf24', pants: '#78350f', shoes: '#3d1f00', crown: '#ff6b00' },
   4: { hair: '#111', skin: '#c8956c', shirt: '#f97316', pants: '#431407', shoes: '#111', crown: '#fbbf24' },
-  5: { hair: '#6d28d9', skin: '#f4c28a', shirt: '#8b5cf6', pants: '#2e1065', shoes: '#1a0a30', crown: '#fbbf24' },
+  5: { hair: '#0ea5e9', skin: '#f4c28a', shirt: '#38bdf8', pants: '#082f49', shoes: '#0c4a6e', crown: '#fbbf24' },
   6: { hair: '#b0b0c0', skin: '#e8d5c4', shirt: '#e2e8f0', pants: '#475569', shoes: '#1e293b', crown: '#ff4444' },
 }
 

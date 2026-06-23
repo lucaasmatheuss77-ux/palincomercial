@@ -5,17 +5,127 @@ import Image from 'next/image'
 import { toast } from 'sonner'
 import {
   Mic, Square, Loader2,
-  UserPlus, CalendarDays, Users, ChevronRight, ChevronDown,
-  Phone, FileSignature, AlertCircle, X, Search, Zap,
+  UserPlus, CalendarDays, Users, ChevronRight,
+  Phone, FileSignature, AlertCircle, X, Search,
   Target, Plus, MapPin, Navigation,
 } from 'lucide-react'
-import PixelAvatar, { skinFromName } from '@/components/PixelAvatar'
 import { createLead, updateLeadStage } from '@/app/actions/pipeline'
 import { recordCommercialActivity } from '@/app/actions/commercial-activities'
 import { triggerSaleConfetti } from '@/lib/effects'
 
+// ── Fundo estrelado ───────────────────────────────────────────────────────────
+function StarField() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    type Star = { x: number; y: number; r: number; o: number; speed: number; phase: number }
+    let stars: Star[] = []
+    let animId: number
+
+    function resize() {
+      if (!canvas) return
+      canvas.width  = window.innerWidth
+      canvas.height = window.innerHeight
+      stars = Array.from({ length: 150 }, () => ({
+        x:     Math.random() * canvas.width,
+        y:     Math.random() * canvas.height,
+        r:     Math.random() * 1.5 + 0.2,
+        o:     Math.random() * 0.75 + 0.12,
+        speed: Math.random() * 0.012 + 0.003,
+        phase: Math.random() * Math.PI * 2,
+      }))
+    }
+
+    function draw() {
+      if (!canvas || !ctx) return
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      stars.forEach(s => {
+        s.phase += s.speed
+        const opacity = s.o * (0.5 + 0.5 * Math.sin(s.phase))
+        ctx.beginPath()
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(255,255,255,${opacity})`
+        ctx.fill()
+      })
+      animId = requestAnimationFrame(draw)
+    }
+
+    resize()
+    window.addEventListener('resize', resize)
+    animId = requestAnimationFrame(draw)
+    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', resize) }
+  }, [])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }}
+    />
+  )
+}
+
+// ── Partículas douradas ───────────────────────────────────────────────────────
+type Particle = { top: string; left: string; size: string; dur: string; delay: string; op: number; drift: number }
+
+function FloatingParticles() {
+  const [list, setList] = useState<Particle[]>([])
+  useEffect(() => {
+    setList(Array.from({ length: 15 }, () => ({
+      top:   `${Math.random() * 100}%`,
+      left:  `${Math.random() * 100}%`,
+      size:  `${Math.random() * 4 + 1.5}px`,
+      dur:   `${Math.random() * 8 + 6}s`,
+      delay: `${Math.random() * 7}s`,
+      op:    Math.random() * 0.28 + 0.07,
+      drift: Math.random() * 28 - 14,
+    })))
+  }, [])
+
+  return (
+    <div aria-hidden style={{ position: 'fixed', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 1 }}>
+      {list.map((p, i) => (
+        <div key={i} style={{
+          position: 'absolute', top: p.top, left: p.left,
+          width: p.size, height: p.size,
+          background: `rgba(251,191,36,${p.op})`,
+          borderRadius: '50%', filter: 'blur(1px)',
+          boxShadow: '0 0 8px rgba(251,191,36,0.25)',
+          animation: `fp-float ${p.dur} ease-in-out infinite`,
+          animationDelay: p.delay,
+          ['--fp-drift' as string]: `${p.drift}px`,
+        } as React.CSSProperties} />
+      ))}
+      <style>{`
+        @keyframes fp-float {
+          0% { transform: translateY(100vh) translateX(0); opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { transform: translateY(-100px) translateX(var(--fp-drift)); opacity: 0; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 // ── Tipos ─────────────────────────────────────────────────────────────────────
-type TabId = 'pipeline' | 'acoes' | 'voz' | 'agenda' | 'radar'
+type TabId = 'pipeline' | 'agenda' | 'radar' | 'lead' | 'call' | 'contract' | 'voz'
+
+// ── Constante de tabs para FAB ──────────────────────────────────────────────
+const ALL_TABS: { id: TabId; icon: React.ElementType; label: string; color: string }[] = [
+  { id: 'pipeline', icon: Users,         label: 'Pipeline', color: '#fbbf24' },
+  { id: 'radar',    icon: Target,        label: 'Radar',    color: '#38bdf8' },
+  { id: 'voz',      icon: Mic,           label: 'Voz IA',   color: '#94a3b8' },
+  { id: 'lead',     icon: UserPlus,      label: 'Novo Lead',color: '#10b981' },
+  { id: 'call',     icon: Phone,         label: 'Ligação',  color: '#f59e0b' },
+  { id: 'agenda',   icon: CalendarDays,  label: 'Agenda',   color: '#7dd3fc' },
+  { id: 'contract', icon: FileSignature, label: 'Contrato', color: '#34d399' },
+]
 
 type Lead = {
   id: string
@@ -58,145 +168,139 @@ const STAGES = ['Contato Inicial', 'Qualificação', 'Apresentação', 'Proposta
 
 function formatTime(s: number) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}` }
 
-// ── FAB Menu ──────────────────────────────────────────────────────────────────
-const TAB_ITEMS: { id: TabId; icon: React.ElementType; label: string }[] = [
-  { id: 'pipeline', icon: Users,       label: 'Pipeline' },
-  { id: 'acoes',    icon: Zap,          label: 'Ações'    },
-  { id: 'voz',      icon: Mic,          label: 'Voz IA'   },
-  { id: 'agenda',   icon: CalendarDays, label: 'Agenda'   },
-  { id: 'radar',    icon: Target,       label: 'Radar'    },
-]
-
+// ── FAB Semicircle (abre para cima em arco) ──────────────────────────────────
 function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => void }) {
   const [open, setOpen] = useState(false)
-  const N      = TAB_ITEMS.length  // 5
-  const FAB_R  = 32   // metade do FAB (64px)
-  const RADIUS = 100  // distância do centro do FAB até o centro de cada item
-  // Arco superior: ângulos de 20° a 160° (convenção matemática: 0=direita, 90=cima)
-  // Em CSS: top = centerY - sin(angle)*r  (sin positivo = sobe na tela)
-  //         left = centerX + cos(angle)*r
-  const A_START = 20
-  const A_END   = 160
 
-  const activeItem = TAB_ITEMS.find(t => t.id === active)
+  const N       = ALL_TABS.length  // 7 itens
+  const RADIUS  = 110             // raio do arco
+  // Arco de 15° a 165° = semicírculo superior
+  const A_START = 15
+  const A_END   = 165
+
+  const activeTab = ALL_TABS.find(t => t.id === active)
 
   return (
     <>
-      {/* Backdrop */}
       {open && (
         <div
           onClick={() => setOpen(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 190 }}
+          onTouchStart={(e) => { e.preventDefault(); setOpen(false); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', zIndex: 9990 }}
         />
       )}
 
-      {/* Contêiner fixo — tamanho explícito = tamanho do FAB */}
-      <div style={{
-        position: 'fixed',
-        bottom: 24,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: 64,
-        height: 64,
-        zIndex: 200,
-      }}>
+      {/* Itens em arco */}
+      {open && ALL_TABS.map((item, i) => {
+        const angleDeg = A_START + (A_END - A_START) * (i / (N - 1))
+        const rad = angleDeg * Math.PI / 180
+        const dx = Math.cos(rad) * RADIUS     // + direita
+        const dy = Math.sin(rad) * RADIUS     // + cima (usando bottom)
+        const isAct = active === item.id
+        const Icon = item.icon
 
-        {/* Itens do arco */}
-        {TAB_ITEMS.map((item, i) => {
-          const angleDeg = A_START + (A_END - A_START) * (i / (N - 1))
-          const rad      = angleDeg * Math.PI / 180
-          // posição relativa ao centro do FAB (FAB_R, FAB_R)
-          const dx = Math.cos(rad) * RADIUS   // + = direita
-          const dy = -Math.sin(rad) * RADIUS  // - = cima (CSS Y invertido)
-          const isAct = active === item.id
-          const Icon  = item.icon
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onChange(item.id); setOpen(false); }}
+            title={item.label}
+            style={{
+              position: 'fixed',
+              left: `calc(50% - 27px + ${dx}px)`,
+              bottom: 120 + 27 + dy,
+              width: 54,
+              height: 54,
+              borderRadius: '50%',
+              background: isAct
+                ? `linear-gradient(135deg, ${item.color}88, ${item.color})`
+                : 'rgba(13,17,23,0.97)',
+              border: `2px solid ${isAct ? item.color : item.color + '55'}`,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 3,
+              cursor: 'pointer',
+              boxShadow: isAct
+                ? `0 0 20px ${item.color}80, 0 4px 16px rgba(0,0,0,0.8)`
+                : `0 0 10px ${item.color}30, 0 4px 14px rgba(0,0,0,0.7)`,
+              animation: `fadeInUp 0.3s cubic-bezier(0.34,1.56,0.64,1) ${i * 0.03}s both`,
+              zIndex: 9998,
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <Icon size={17} color={isAct ? '#0a0600' : item.color} strokeWidth={2.3} style={{ pointerEvents: 'none' }} />
+            <span style={{
+              fontSize: '0.42rem',
+              fontWeight: 900,
+              color: isAct ? '#0a0600' : item.color,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              lineHeight: 1,
+              pointerEvents: 'none',
+            }}>
+              {item.label}
+            </span>
+          </button>
+        )
+      })}
 
-          return (
-            <button
-              key={item.id}
-              onClick={() => { onChange(item.id); setOpen(false) }}
-              style={{
-                position: 'absolute',
-                // parte do centro do FAB e desloca pelo arco
-                left:  FAB_R + dx,
-                top:   FAB_R + dy,
-                transform: `translate(-50%, -50%) scale(${open ? 1 : 0})`,
-                transformOrigin: 'center',
-                width: 62, height: 62, borderRadius: '50%',
-                background: isAct
-                  ? 'linear-gradient(135deg, #b8880a, #fbbf24)'
-                  : 'rgba(10,12,16,0.96)',
-                border: `2px solid ${isAct ? '#fbbf24' : 'rgba(251,191,36,0.35)'}`,
-                display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center', gap: 4,
-                cursor: 'pointer',
-                boxShadow: isAct
-                  ? '0 0 22px rgba(251,191,36,0.6)'
-                  : '0 6px 24px rgba(0,0,0,0.7)',
-                transition: `transform 0.38s cubic-bezier(0.34,1.56,0.64,1) ${i * 0.05}s,
-                             opacity 0.28s ease ${i * 0.03}s`,
-                opacity: open ? 1 : 0,
-                pointerEvents: open ? 'auto' : 'none',
-                zIndex: 201,
-              }}
-            >
-              <Icon size={19} color={isAct ? '#0a0600' : '#fbbf24'} strokeWidth={2.2} />
-              <span style={{
-                fontSize: '0.44rem', fontWeight: 900,
-                color: isAct ? '#0a0600' : '#fbbf24',
-                textTransform: 'uppercase', letterSpacing: '0.07em',
-                lineHeight: 1,
-              }}>
-                {item.label}
-              </span>
-            </button>
-          )
-        })}
+      {/* Label da aba ativa */}
+      {!open && activeTab && (
+        <div style={{
+          position: 'fixed',
+          bottom: 120 + 70, // 120 + 60 + 10
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          padding: '4px 12px',
+          borderRadius: 12,
+          fontSize: '0.7rem',
+          fontWeight: 600,
+          color: activeTab.color,
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase',
+          pointerEvents: 'none',
+          boxShadow: `0 2px 12px ${activeTab.color}20`,
+          zIndex: 201,
+        }}>
+          {activeTab.label}
+        </div>
+      )}
 
-        {/* Label da aba ativa — visível quando fechado */}
-        {!open && activeItem && (
-          <div style={{
-            position: 'absolute',
-            bottom: '100%', left: '50%',
-            transform: 'translateX(-50%)',
-            marginBottom: 8,
-            background: 'rgba(10,12,16,0.92)',
-            border: '1px solid rgba(251,191,36,0.25)',
-            borderRadius: 999,
-            padding: '5px 14px',
-            fontSize: '0.64rem', fontWeight: 900,
-            color: '#fbbf24',
-            textTransform: 'uppercase', letterSpacing: '0.08em',
-            whiteSpace: 'nowrap',
-            pointerEvents: 'none',
-          }}>
-            {activeItem.label}
-          </div>
-        )}
-
-        {/* Botão FAB principal */}
-        <button
-          onClick={() => setOpen(v => !v)}
-          style={{
-            position: 'absolute', inset: 0,
-            borderRadius: '50%',
-            background: open
-              ? 'rgba(10,12,16,0.95)'
-              : 'linear-gradient(135deg, #b8880a 0%, #fbbf24 50%, #d4970c 100%)',
-            border: open ? '2px solid rgba(251,191,36,0.5)' : 'none',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-            boxShadow: open
-              ? '0 0 28px rgba(251,191,36,0.25)'
-              : '0 0 36px rgba(251,191,36,0.45), 0 8px 28px rgba(0,0,0,0.6)',
-            transform: open ? 'rotate(45deg)' : 'rotate(0deg)',
-            transition: 'all 0.32s cubic-bezier(0.34,1.56,0.64,1)',
-            zIndex: 202,
-          }}
-        >
-          <Plus size={30} color={open ? '#fbbf24' : '#0a0600'} strokeWidth={2.5} />
-        </button>
-      </div>
+      {/* Botão FAB principal */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          position: 'fixed',
+          bottom: 120,
+          left: 'calc(50% - 30px)',
+          transform: open ? 'rotate(45deg)' : 'none',
+          width: 60,
+          height: 60,
+          borderRadius: '50%',
+          background: open
+            ? 'rgba(13,17,23,0.98)'
+            : 'linear-gradient(135deg, #92620a 0%, #d4970c 35%, #fbbf24 60%, #f0a500 100%)',
+          border: open ? '2px solid rgba(251,191,36,0.6)' : 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          boxShadow: open
+            ? '0 0 32px rgba(251,191,36,0.3)'
+            : '0 0 40px rgba(251,191,36,0.55), 0 8px 32px rgba(0,0,0,0.7)',
+          transition: 'all 0.35s cubic-bezier(0.34,1.56,0.64,1)',
+          zIndex: 9999,
+          pointerEvents: 'auto',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        <Plus size={28} color={open ? '#fbbf24' : '#0a0600'} strokeWidth={2.5} style={{ pointerEvents: 'none' }} />
+      </button>
     </>
   )
 }
@@ -204,11 +308,19 @@ function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => 
 // ── StatCard ──────────────────────────────────────────────────────────────────
 function StatCard({ label, value, sub, color = '#fbbf24', alert = false }: { label: string; value: string | number; sub: string; color?: string; alert?: boolean }) {
   return (
-    <div style={{ flex: 1, minWidth: 0, padding: '12px 10px', background: 'rgba(22,27,34,0.9)', border: `1px solid ${alert ? 'rgba(239,68,68,0.3)' : 'rgba(251,191,36,0.1)'}`, borderRadius: 12, position: 'relative', overflow: 'hidden' }}>
-      {alert && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: '#ef4444' }} />}
-      <p style={{ fontSize: '0.52rem', color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 5 }}>{label}</p>
-      <p style={{ fontSize: '1.4rem', fontWeight: 900, color, lineHeight: 1, letterSpacing: '-0.03em' }}>{value}</p>
-      <p style={{ fontSize: '0.58rem', color: '#334155', marginTop: 4, fontWeight: 600 }}>{sub}</p>
+    <div style={{
+      flex: 1, minWidth: 0, padding: '13px 12px',
+      background: `linear-gradient(135deg, rgba(22,27,34,0.95) 0%, rgba(${alert ? '239,68,68' : '22,27,34'},0.85) 100%)`,
+      border: `1px solid ${alert ? 'rgba(239,68,68,0.35)' : color + '22'}`,
+      borderRadius: 14, position: 'relative', overflow: 'hidden',
+      backdropFilter: 'blur(8px)',
+      boxShadow: `0 4px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)`,
+    }}>
+      {alert && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, #ef4444, #f97316)' }} />}
+      {!alert && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, transparent, ${color}40, transparent)` }} />}
+      <p style={{ fontSize: '0.5rem', color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: 6 }}>{label}</p>
+      <p style={{ fontSize: '1.5rem', fontWeight: 900, color, lineHeight: 1, letterSpacing: '-0.04em', textShadow: `0 0 20px ${color}60` }}>{value}</p>
+      <p style={{ fontSize: '0.57rem', color: '#334155', marginTop: 5, fontWeight: 600 }}>{sub}</p>
     </div>
   )
 }
@@ -216,20 +328,35 @@ function StatCard({ label, value, sub, color = '#fbbf24', alert = false }: { lab
 // ── Lead Row ──────────────────────────────────────────────────────────────────
 function LeadRow({ lead, onTap }: { lead: Lead; onTap: () => void }) {
   const sc = STAGE_COLORS[lead.stage || ''] || '#64748b'
+  const isUrgent = ['Proposta', 'Negociacao', 'Negociação'].includes(lead.stage || '')
   return (
-    <button onClick={onTap} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 11, padding: '12px 14px', background: 'rgba(22,27,34,0.9)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, cursor: 'pointer', textAlign: 'left' }}>
-      <div style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, background: `${sc}18`, border: `1.5px solid ${sc}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.82rem', fontWeight: 900, color: sc }}>
+    <button className={isUrgent ? 'pulse-red-border' : ''} onClick={onTap} style={{
+      width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px',
+      background: isUrgent ? 'linear-gradient(135deg, rgba(69,10,10,0.6) 0%, rgba(16,20,28,0.9) 100%)' : 'linear-gradient(135deg, rgba(22,27,34,0.95) 0%, rgba(16,20,28,0.9) 100%)',
+      border: isUrgent ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.07)',
+      borderRadius: 14, cursor: 'pointer', textAlign: 'left',
+      boxShadow: isUrgent ? '0 2px 12px rgba(239,68,68,0.3), inset 0 1px 0 rgba(239,68,68,0.1)' : '0 2px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03)',
+      transition: 'border-color 0.2s, box-shadow 0.2s',
+    }}>
+      <div style={{
+        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+        background: `linear-gradient(135deg, ${sc}25, ${sc}12)`,
+        border: `1.5px solid ${sc}45`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '0.9rem', fontWeight: 900, color: sc,
+        boxShadow: `0 0 12px ${sc}25`,
+      }}>
         {lead.name.charAt(0).toUpperCase()}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: '0.83rem', fontWeight: 700, color: '#f0f6fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.name}</p>
+        <p style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f0f6fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.name}</p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
-          <span style={{ width: 5, height: 5, borderRadius: '50%', background: sc }} />
+          <span style={{ width: 5, height: 5, borderRadius: '50%', background: sc, boxShadow: `0 0 6px ${sc}` }} />
           <span style={{ fontSize: '0.62rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{lead.stage}</span>
           {lead.segmento_especifico && <span style={{ fontSize: '0.58rem', color: '#334155', marginLeft: 4 }}>· {lead.segmento_especifico}</span>}
         </div>
       </div>
-      <ChevronRight size={14} color="#1e293b" />
+      <ChevronRight size={14} color="#334155" />
     </button>
   )
 }
@@ -259,7 +386,7 @@ function LeadDetail({ lead, onClose, onUpdate }: { lead: Lead; onClose: () => vo
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-end' }}>
-      <div style={{ width: '100%', background: '#0d1117', borderRadius: '20px 20px 0 0', border: '1px solid rgba(251,191,36,0.15)', padding: '24px 20px 40px', display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '85vh', overflowY: 'auto' }}>
+      <div style={{ width: '100%', background: 'rgba(13,17,23,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '20px 20px 0 0', border: '1px solid rgba(251,191,36,0.15)', padding: '24px 20px 40px', display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <p style={{ fontSize: '1rem', fontWeight: 900, color: '#f0f6fc' }}>{lead.name}</p>
@@ -326,13 +453,13 @@ function PipelineView({ leads, stats, onLeadsChange }: { leads: Lead[]; stats: M
       </div>
       <div style={{ display: 'flex', gap: 7 }}>
         <StatCard label="Conversão" value={`${stats.conversionRate}%`} sub="Taxa" color="#fbbf24" />
-        <StatCard label="Reuniões" value={stats.reunioesHoje} sub="Hoje" color="#e879f9" />
+        <StatCard label="Reuniões" value={stats.reunioesHoje} sub="Hoje" color="#94a3b8" />
         <StatCard label="Atrasadas" value={stats.atividadesAtrasadas} sub="Atividades" color={stats.atividadesAtrasadas > 0 ? '#ef4444' : '#64748b'} alert={stats.atividadesAtrasadas > 0} />
       </div>
       <div style={{ position: 'relative' }}>
         <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#334155', pointerEvents: 'none' }} />
         <input type="text" placeholder="Buscar por nome, etapa ou cidade..." value={search} onChange={e => setSearch(e.target.value)}
-          style={{ width: '100%', padding: '9px 12px 9px 34px', background: 'rgba(22,27,34,0.9)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, color: '#f0f6fc', fontSize: '0.82rem', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+          style={{ width: '100%', padding: '9px 12px 9px 34px', background: 'rgba(22,27,34,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, color: '#f0f6fc', fontSize: '0.82rem', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }} />
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {filtered.length === 0
@@ -352,6 +479,7 @@ function RadarView({ leads }: { leads: Lead[] }) {
   const [myCity, setMyCity]       = useState('')
   const [gpsLoading, setGpsLoading] = useState(false)
   const [gpsError, setGpsError]   = useState('')
+  const [gpsSource, setGpsSource] = useState<'native'|'ip'|'manual'|null>(null)
   const [nearbyLeads, setNearby]  = useState<GeoLead[]>([])
   const [allLeads, setAllLeads]   = useState<GeoLead[]>([])
   const [selectedLead, setSelected] = useState<Lead | null>(null)
@@ -386,42 +514,92 @@ function RadarView({ leads }: { leads: Lead[] }) {
   async function detectGPS() {
     setGpsLoading(true)
     setGpsError('')
-    if (!navigator.geolocation) {
-      setGpsError('GPS não suportado neste dispositivo.')
-      setGpsLoading(false)
-      return
-    }
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
+
+    // Estratégia principal: API server-side que não depende de HTTPS no browser
+    // O servidor faz a consulta de geolocalização pelo IP real do dispositivo
+    try {
+      const res  = await fetch('/api/geolocate', { signal: AbortSignal.timeout(10000) })
+      const data = await res.json() as {
+        success: boolean
+        city?: string
+        region?: string
+        lat?: number | null
+        lon?: number | null
+        ip?: string
+        source?: string
+        isPrivate?: boolean
+        error?: string
+      }
+
+      if (data.success && data.city) {
+        setMyCity(data.city)
+        setSearchCity(data.city)
+        setGpsSource('ip')
+        const count = matchLeadsByCity(data.city)
+        const regionLabel = data.region ? ` (${data.region})` : ''
+        toast.success(`📍 Localização: ${data.city}${regionLabel}`, {
+          description: `${count} lead(s) nesta região. (via IP do dispositivo)`,
+        })
+        setGpsLoading(false)
+        return
+      }
+
+      // Se retornou IP privado (rede local), orientar busca manual
+      if (data.isPrivate) {
+        setGpsError('Você está em rede local (Wi-Fi). Digite sua cidade manualmente.')
+        toast.info('Rede local detectada', {
+          description: 'Use o campo de busca para digitar sua cidade.',
+        })
+        setGpsLoading(false)
+        return
+      }
+
+    } catch { /* fallback abaixo */ }
+
+    // Fallback: tenta GPS nativo do browser (só funciona em HTTPS)
+    const isSecure = location.protocol === 'https:' || location.hostname === 'localhost'
+    if (isSecure && navigator.geolocation) {
+      const coords = await new Promise<{ lat: number; lon: number } | null>((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          () => resolve(null),
+          { timeout: 10000, maximumAge: 60000, enableHighAccuracy: false }
+        )
+      })
+
+      if (coords) {
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&format=json&accept-language=pt-BR`,
-            { headers: { 'User-Agent': 'PalinMartinsCRM/1.0' } }
+          const res  = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${coords.lat}&lon=${coords.lon}&format=json&accept-language=pt-BR`,
+            { headers: { 'User-Agent': 'PalinMartinsCRM/1.0' }, signal: AbortSignal.timeout(6000) }
           )
-          const data = await res.json() as { address?: { city?: string; town?: string; village?: string; municipality?: string; state?: string } }
-          const city = data.address?.city || data.address?.town || data.address?.village || data.address?.municipality || ''
-          setMyCity(city)
-          setSearchCity(city)
-          const count = matchLeadsByCity(city)
-          toast.success(`Localização: ${city}`, { description: `${count} lead(s) nesta região.` })
-        } catch {
-          setGpsError('Erro ao identificar cidade. Tente buscar manualmente.')
-        }
-        setGpsLoading(false)
-      },
-      (err) => {
-        const msg = err.code === 1 ? 'Permissão de GPS negada.' : err.code === 2 ? 'GPS indisponível.' : 'Tempo esgotado.'
-        setGpsError(msg)
-        toast.error(msg, { description: 'Use a busca manual por cidade.' })
-        setGpsLoading(false)
-      },
-      { timeout: 10000, maximumAge: 60000, enableHighAccuracy: false }
-    )
+          const geoData = await res.json() as { address?: { city?: string; town?: string; village?: string; municipality?: string } }
+          const city = geoData.address?.city || geoData.address?.town || geoData.address?.village || geoData.address?.municipality || ''
+          if (city) {
+            setMyCity(city)
+            setSearchCity(city)
+            setGpsSource('native')
+            const count = matchLeadsByCity(city)
+            toast.success(`📍 ${city}`, { description: `${count} lead(s) nesta região. (GPS nativo)` })
+            setGpsLoading(false)
+            return
+          }
+        } catch { /* ignora */ }
+      }
+    }
+
+    // Sem sucesso em nenhuma estratégia
+    setGpsError('Não foi possível detectar localização. Digite sua cidade abaixo.')
+    toast.warning('Localização indisponível', {
+      description: 'Use o campo de busca manual para encontrar leads por cidade.',
+    })
+    setGpsLoading(false)
   }
 
   function handleManualSearch() {
     if (!searchCity.trim()) return
     setMyCity(searchCity)
+    setGpsSource('manual')
     const count = matchLeadsByCity(searchCity)
     toast.info(`Buscando em: ${searchCity}`, { description: `${count} lead(s) encontrado(s).` })
   }
@@ -440,11 +618,18 @@ function RadarView({ leads }: { leads: Lead[] }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
       {/* GPS + busca manual */}
-      <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid rgba(251,191,36,0.1)', borderRadius: 14, padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+      <div style={{ background: 'rgba(22,27,34,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(251,191,36,0.1)', borderRadius: 14, padding: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
           <Target size={15} color="#fbbf24" />
           <p style={{ fontSize: '0.7rem', fontWeight: 900, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Radar de Clientes</p>
-          {myCity && <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 999 }}>📍 {myCity}</span>}
+          {myCity && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: 999 }}>📍 {myCity}</span>
+              {gpsSource === 'native' && <span style={{ fontSize: '0.55rem', fontWeight: 800, color: '#22c55e', background: 'rgba(34,197,94,0.1)', padding: '2px 6px', borderRadius: 999 }}>🛰️ GPS</span>}
+              {gpsSource === 'ip' && <span style={{ fontSize: '0.55rem', fontWeight: 800, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', padding: '2px 6px', borderRadius: 999 }}>🌐 IP</span>}
+              {gpsSource === 'manual' && <span style={{ fontSize: '0.55rem', fontWeight: 800, color: '#94a3b8', background: 'rgba(148,163,184,0.1)', padding: '2px 6px', borderRadius: 999 }}>⌨️ MANUAL</span>}
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
@@ -516,7 +701,7 @@ function RadarView({ leads }: { leads: Lead[] }) {
               </div>
             : displayLeads.slice(0, 10).map(lead => (
                 <button key={lead.id} onClick={() => setSelected(lead)}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 11, padding: '12px 14px', background: lead.matched ? 'rgba(251,191,36,0.07)' : 'rgba(22,27,34,0.9)', border: `1px solid ${lead.matched ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 12, cursor: 'pointer', textAlign: 'left' }}>
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 11, padding: '12px 14px', background: lead.matched ? 'rgba(251,191,36,0.07)' : 'rgba(22,27,34,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: `1px solid ${lead.matched ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 12, cursor: 'pointer', textAlign: 'left' }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: lead.matched ? '#fbbf24' : (STAGE_COLORS[lead.stage||'']||'#64748b'), flexShrink: 0, boxShadow: lead.matched ? '0 0 8px rgba(251,191,36,0.7)' : 'none' }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: '0.83rem', fontWeight: 700, color: '#f0f6fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.name}</p>
@@ -565,7 +750,7 @@ function NewLeadInline({ onDone }: { onDone: (lead: Lead) => void }) {
   }
 
   return (
-    <div style={{ background: 'rgba(22,27,34,0.95)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 14, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+    <div style={{ background: 'rgba(22,27,34,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 14, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
       <p style={{ fontSize: '0.6rem', fontWeight: 900, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Novo Lead</p>
       <input value={nome} onChange={e => setNome(e.target.value)} placeholder="Nome do cliente *" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
       <input value={whats} onChange={e => setWhats(e.target.value)} placeholder="WhatsApp" type="tel" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
@@ -598,9 +783,9 @@ function LogCallInline({ leads }: { leads: Lead[] }) {
   }
 
   return (
-    <div style={{ background: 'rgba(22,27,34,0.95)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+    <div style={{ background: 'rgba(22,27,34,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
       <p style={{ fontSize: '0.6rem', fontWeight: 900, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Registrar Ligação</p>
-      <select value={selectedId} onChange={e => setSelectedId(e.target.value)} style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: selectedId ? '#f0f6fc' : '#64748b', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%' }}>
+      <select value={selectedId} onChange={e => setSelectedId(e.target.value)} style={{ background: 'rgba(13,17,23,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: selectedId ? '#f0f6fc' : '#64748b', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%' }}>
         <option value="">Selecione o lead...</option>
         {active.map(l => <option key={l.id} value={l.id}>{l.name}{l.segmento_especifico ? ` — ${l.segmento_especifico}` : ''}</option>)}
       </select>
@@ -631,7 +816,7 @@ function ContractInline({ leads, onDone }: { leads: Lead[]; onDone: () => void }
   return (
     <div style={{ background: 'linear-gradient(135deg,rgba(251,191,36,0.08),rgba(22,27,34,0.9))', border: '1px solid rgba(251,191,36,0.22)', borderRadius: 14, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
       <p style={{ fontSize: '0.6rem', fontWeight: 900, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.1em' }}>🤝 Registrar Contrato</p>
-      <select value={selectedId} onChange={e => setSelectedId(e.target.value)} style={{ background: '#0d1117', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 9, padding: '10px 12px', color: selectedId ? '#f0f6fc' : '#64748b', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%' }}>
+      <select value={selectedId} onChange={e => setSelectedId(e.target.value)} style={{ background: 'rgba(13,17,23,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 9, padding: '10px 12px', color: selectedId ? '#f0f6fc' : '#64748b', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%' }}>
         <option value="">Selecione o lead a fechar...</option>
         {(hot.length > 0 ? hot : leads.filter(l => l.stage !== 'Fechado' && l.stage !== 'Perdido')).map(l => <option key={l.id} value={l.id}>{l.name} — {l.stage}</option>)}
       </select>
@@ -645,35 +830,7 @@ function ContractInline({ leads, onDone }: { leads: Lead[]; onDone: () => void }
   )
 }
 
-function AcoesView({ leads, onLeadsChange }: { leads: Lead[]; onLeadsChange: (l: Lead[]) => void }) {
-  const [open, setOpen] = useState<'lead'|'call'|'contract'|null>(null)
-  const toggle = (k: 'lead'|'call'|'contract') => setOpen(v => v === k ? null : k)
 
-  function ActionToggle({ id, emoji, label, sub }: { id: 'lead'|'call'|'contract'; emoji: string; label: string; sub: string }) {
-    const on = open === id
-    return (
-      <button onClick={() => toggle(id)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 13, padding: '13px 15px', background: on ? 'rgba(251,191,36,0.08)' : 'rgba(22,27,34,0.9)', border: `1px solid ${on ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.07)'}`, borderRadius: 13, cursor: 'pointer', textAlign: 'left' }}>
-        <span style={{ fontSize: '1.4rem', flexShrink: 0 }}>{emoji}</span>
-        <div style={{ flex: 1 }}>
-          <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#f0f6fc', lineHeight: 1.2 }}>{label}</p>
-          <p style={{ fontSize: '0.65rem', color: '#475569', marginTop: 2 }}>{sub}</p>
-        </div>
-        {on ? <ChevronDown size={16} color="#fbbf24" /> : <ChevronRight size={16} color="#1e293b" />}
-      </button>
-    )
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <ActionToggle id="lead"     emoji="👤" label="Novo Lead"           sub="Cadastrar nova oportunidade — informe a cidade!" />
-      {open === 'lead'     && <NewLeadInline onDone={l => { onLeadsChange([l,...leads]); setOpen(null) }} />}
-      <ActionToggle id="call"     emoji="📞" label="Registrar Ligação"   sub="Logar contato no histórico do lead" />
-      {open === 'call'     && <LogCallInline leads={leads} />}
-      <ActionToggle id="contract" emoji="🤝" label="Registrar Contrato"  sub="Marcar lead como fechado" />
-      {open === 'contract' && <ContractInline leads={leads} onDone={() => setOpen(null)} />}
-    </div>
-  )
-}
 
 // ── Voz IA ────────────────────────────────────────────────────────────────────
 type TriggerType = 'followup'|'reuniao'|'proposta'|'urgente'|'fechamento'|'nota'
@@ -710,12 +867,22 @@ function VozView({ leads }: { leads: Lead[] }) {
     if(phase==='done')      { setPhase('idle'); setLead(null); setResult(null); return }
     if(phase==='recording') { setPhase('processing'); stopTimer(); mrRef.current?.stop(); return }
     if(phase==='ready') {
-      const ok = location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'
-      if(!ok){ toast.error('Microfone requer HTTPS'); return }
-      if(!navigator.mediaDevices?.getUserMedia){ toast.error('Microfone não suportado'); return }
+      if(!navigator.mediaDevices?.getUserMedia){ toast.error('Microfone não suportado neste browser'); return }
       let stream: MediaStream
-      try { stream = await navigator.mediaDevices.getUserMedia({audio:true}) }
-      catch { toast.error('Permissão de microfone negada'); return }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({audio:true})
+      } catch(err: unknown) {
+        // SecurityError = browser bloqueou por HTTP (não é localhost/HTTPS)
+        const name = err instanceof Error ? err.name : ''
+        if(name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          toast.error('Permissão negada', { description: 'Permita o microfone nas configurações do browser.' })
+        } else if(name === 'NotSupportedError' || name === 'SecurityError') {
+          toast.error('Microfone bloqueado', { description: 'Para gravar voz, acesse via HTTPS ou localhost.' })
+        } else {
+          toast.error('Microfone indisponível', { description: 'Verifique se o microfone está conectado.' })
+        }
+        return
+      }
       chRef.current=[]
       const mt = MediaRecorder.isTypeSupported('audio/webm')?'audio/webm':'audio/ogg'
       const mr = new MediaRecorder(stream,{mimeType:mt})
@@ -755,7 +922,7 @@ function VozView({ leads }: { leads: Lead[] }) {
         </div>
       </div>
 
-      <button onClick={tap} disabled={isProc} style={{width:'100%',display:'flex',alignItems:'center',gap:14,padding:'16px',background:isRec?'rgba(239,68,68,0.07)':isDone?'rgba(16,185,129,0.05)':'rgba(22,27,34,0.9)',border:`1px solid ${isRec?'rgba(239,68,68,0.25)':isDone?'rgba(16,185,129,0.2)':'rgba(255,255,255,0.07)'}`,borderRadius:14,cursor:isProc?'wait':'pointer',textAlign:'left'}}>
+      <button onClick={tap} disabled={isProc} style={{width:'100%',display:'flex',alignItems:'center',gap:14,padding:'16px',background:isRec?'rgba(239,68,68,0.07)':isDone?'rgba(16,185,129,0.05)':'rgba(22,27,34,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',border:`1px solid ${isRec?'rgba(239,68,68,0.25)':isDone?'rgba(16,185,129,0.2)':'rgba(255,255,255,0.07)'}`,borderRadius:14,cursor:isProc?'wait':'pointer',textAlign:'left'}}>
         <div style={{width:48,height:48,borderRadius:14,background:`${ac}15`,border:`1px solid ${ac}30`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
           {isProc?<Loader2 size={20} color="#f59e0b" style={{animation:'spin 1s linear infinite'}}/>:isRec?<Square size={18} color="#ef4444"/>:<Mic size={20} color={isDone?'#10b981':'#fbbf24'}/>}
         </div>
@@ -814,7 +981,7 @@ function VozView({ leads }: { leads: Lead[] }) {
               <div style={{flex:1}}><p style={{fontSize:'0.58rem',fontWeight:800,color:tc.text,textTransform:'uppercase' as const,letterSpacing:'0.1em'}}>Gatilho</p><p style={{fontSize:'0.82rem',fontWeight:800,color:'#f0f6fc'}}>{result.triggerLabel}</p></div>
               {result.saved&&<span style={{fontSize:'0.58rem',fontWeight:800,color:'#10b981',background:'rgba(16,185,129,0.1)',padding:'3px 7px',borderRadius:999}}>✓ SALVO</span>}
             </div>
-            <div style={{padding:'10px 13px',borderRadius:11,background:'rgba(22,27,34,0.9)',border:'1px solid rgba(255,255,255,0.06)'}}>
+            <div style={{padding:'10px 13px',borderRadius:11,background:'rgba(22,27,34,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',border:'1px solid rgba(255,255,255,0.06)'}}>
               <p style={{fontSize:'0.56rem',fontWeight:800,color:'#334155',textTransform:'uppercase' as const,letterSpacing:'0.1em',marginBottom:4}}>Você disse</p>
               <p style={{fontSize:'0.76rem',color:'#64748b',lineHeight:1.55,fontStyle:'italic'}}>&ldquo;{result.transcription}&rdquo;</p>
             </div>
@@ -848,7 +1015,7 @@ function AgendaView({ agenda }: { agenda: MobileHubProps['agenda'] }) {
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
       <div style={{display:'flex',gap:7}}>
-        <StatCard label="Hoje" value={agenda.filter(m=>m.scheduled_for&&new Date(m.scheduled_for).toDateString()===hoje).length} sub="Reuniões" color="#e879f9"/>
+        <StatCard label="Hoje" value={agenda.filter(m=>m.scheduled_for&&new Date(m.scheduled_for).toDateString()===hoje).length} sub="Reuniões" color="#7dd3fc"/>
         <StatCard label="Próximas" value={agenda.length} sub="Agendadas" color="#38bdf8"/>
       </div>
       {agenda.length===0
@@ -860,16 +1027,16 @@ function AgendaView({ agenda }: { agenda: MobileHubProps['agenda'] }) {
             const dt=m.scheduled_for?new Date(m.scheduled_for):null
             const isHoje=dt?.toDateString()===hoje
             return (
-              <div key={m.id||i} style={{display:'flex',gap:12,padding:'13px 14px',background:isHoje?'rgba(232,121,249,0.06)':'rgba(22,27,34,0.9)',border:`1px solid ${isHoje?'rgba(232,121,249,0.2)':'rgba(255,255,255,0.06)'}`,borderRadius:12}}>
+              <div key={m.id||i} style={{display:'flex',gap:12,padding:'13px 14px',background:isHoje?'rgba(125,211,252,0.06)':'rgba(22,27,34,0.5)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',border:`1px solid ${isHoje?'rgba(125,211,252,0.2)':'rgba(255,255,255,0.06)'}`,borderRadius:12}}>
                 <div style={{textAlign:'center',flexShrink:0,minWidth:44}}>
-                  <p style={{fontSize:'0.6rem',fontWeight:800,color:isHoje?'#e879f9':'#475569',textTransform:'uppercase' as const}}>{dt?dt.toLocaleDateString('pt-BR',{weekday:'short'}):'-'}</p>
-                  <p style={{fontSize:'1.2rem',fontWeight:900,color:isHoje?'#e879f9':'#f0f6fc',lineHeight:1}}>{dt?dt.getDate():'-'}</p>
+                  <p style={{fontSize:'0.6rem',fontWeight:800,color:isHoje?'#7dd3fc':'#475569',textTransform:'uppercase' as const}}>{dt?dt.toLocaleDateString('pt-BR',{weekday:'short'}):'-'}</p>
+                  <p style={{fontSize:'1.2rem',fontWeight:900,color:isHoje?'#7dd3fc':'#f0f6fc',lineHeight:1}}>{dt?dt.getDate():'-'}</p>
                   <p style={{fontSize:'0.62rem',color:'#475569'}}>{dt?dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}</p>
                 </div>
                 <div style={{flex:1,minWidth:0}}>
                   <p style={{fontSize:'0.84rem',fontWeight:700,color:'#f0f6fc',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.title||'Reunião'}</p>
                   {m.client_name&&<p style={{fontSize:'0.65rem',color:'#475569',marginTop:3}}>{m.client_name}</p>}
-                  {isHoje&&<span style={{fontSize:'0.58rem',fontWeight:800,color:'#e879f9',background:'rgba(232,121,249,0.1)',padding:'2px 7px',borderRadius:999,marginTop:4,display:'inline-block'}}>HOJE</span>}
+                  {isHoje&&<span style={{fontSize:'0.58rem',fontWeight:800,color:'#7dd3fc',background:'rgba(125,211,252,0.1)',padding:'2px 7px',borderRadius:999,marginTop:4,display:'inline-block'}}>HOJE</span>}
                 </div>
               </div>
             )
@@ -886,7 +1053,6 @@ export default function MobileHubClient({ user, leads: initialLeads, stats, agen
   const [leads, setLeads]         = useState<Lead[]>(initialLeads)
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Consultor'
-  const skin      = (user?.avatar_skin ?? skinFromName(firstName)) as import('@/components/avatar-utils').AvatarSkin
 
   useEffect(() => {
     const h = new Date().getHours()
@@ -895,39 +1061,126 @@ export default function MobileHubClient({ user, leads: initialLeads, stats, agen
     else setGreeting('Boa noite')
   }, [])
 
-  return (
-    <div style={{ maxWidth: 500, margin: '0 auto', minHeight: '100svh', background: '#010409', color: '#f0f6fc', position: 'relative', overflowX: 'hidden', fontFamily: 'var(--font-inter),Inter,-apple-system,sans-serif' }}>
-      <div style={{ position: 'fixed', top: 0, left: '20%', right: '20%', height: 200, background: 'radial-gradient(ellipse, rgba(251,191,36,0.05) 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 }} />
+  // Paleta idêntica ao sistema web (globals.css)
+  // --brand-darker: #010409 | --brand-dark: #0d1117 | --brand-surface: #161b22
+  // --brand-primary: #fbbf24 | --brand-text: #f0f6fc
 
-      <div style={{ padding: '16px 16px 120px', position: 'relative', zIndex: 1 }}>
-        {/* Header */}
-        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid rgba(251,191,36,0.08)' }}>
-          <Image src="/logo-branco-pbg.png" alt="Grupo Palin Martins" width={140} height={40} priority style={{ objectFit: 'contain', filter: 'drop-shadow(0 0 10px rgba(168,146,46,0.2))' }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+  return (
+    <>
+      <div style={{
+        maxWidth: 500, margin: '0 auto', minHeight: '100svh',
+        background: 'radial-gradient(ellipse at top, #0d1117 0%, #010409 100%)',
+        color: '#f0f6fc', position: 'relative', overflowX: 'hidden',
+        fontFamily: 'var(--font-inter),Inter,-apple-system,sans-serif',
+      }}>
+      {/* Background animado (igual web login) */}
+      <StarField />
+      <FloatingParticles />
+
+      {/* Conteúdo (zIndex > 1) */}
+      <div style={{ position: 'relative', zIndex: 10 }}>
+      {/* Glow superior — igual ao web */}
+      <div style={{
+        position: 'fixed', top: -80, left: '5%', right: '5%', height: 300,
+        background: 'radial-gradient(ellipse at 50% 0%, rgba(251,191,36,0.09) 0%, transparent 70%)',
+        pointerEvents: 'none', zIndex: 0,
+      }} />
+
+      <div style={{ padding: '0 0 120px', position: 'relative', zIndex: 1 }}>
+
+        {/* ── Header: logo centralizada, sem avatar ── */}
+        <header style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          padding: '28px 20px 20px',
+          borderBottom: '1px solid rgba(251,191,36,0.1)',
+          background: 'linear-gradient(180deg, rgba(22,27,34,0.6) 0%, transparent 100%)',
+          backdropFilter: 'blur(8px)',
+          position: 'sticky', top: 0, zIndex: 10,
+          marginBottom: 20,
+        }}>
+          <Image
+            src="/logo-branco-pbg.png"
+            alt="Grupo Palin Martins"
+            width={160}
+            height={46}
+            priority
+            style={{
+              objectFit: 'contain',
+              filter: 'drop-shadow(0 0 18px rgba(251,191,36,0.25))',
+            }}
+          />
+          {/* Linha de status/alertas abaixo da logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '4px 12px', borderRadius: 999,
+              background: 'rgba(251,191,36,0.08)',
+              border: '1px solid rgba(251,191,36,0.2)',
+            }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px #10b981' }} />
+              <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>{greeting}, <span style={{ color: '#fbbf24' }}>{firstName}</span></span>
+            </div>
             {stats.atividadesAtrasadas > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 999, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                <AlertCircle size={11} color="#ef4444" />
-                <span style={{ fontSize: '0.6rem', fontWeight: 800, color: '#ef4444' }}>{stats.atividadesAtrasadas}</span>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px', borderRadius: 999,
+                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+              }}>
+                <AlertCircle size={10} color="#ef4444" />
+                <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#ef4444' }}>
+                  {stats.atividadesAtrasadas} atrasada{stats.atividadesAtrasadas !== 1 ? 's' : ''}
+                </span>
               </div>
             )}
-            <PixelAvatar skin={skin} size={3} walking accessory="briefcase" label={firstName} role={user?.role} />
           </div>
         </header>
 
-        {/* Saudação */}
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: '0.7rem', color: '#334155', fontWeight: 600 }}>{greeting},</p>
-          <h1 style={{ fontSize: '1.4rem', fontWeight: 900, color: '#f0f6fc', letterSpacing: '-0.03em', lineHeight: 1.1 }}>
-            {firstName}
-            {user?.role && <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#334155', marginLeft: 8, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{user.role}</span>}
-          </h1>
+        {/* ── Saudação ── */}
+        <div style={{ padding: '0 16px', marginBottom: 20 }}>
+          <p style={{ fontSize: '0.7rem', color: '#8b949e', fontWeight: 600, marginBottom: 2 }}>
+            {greeting}, {firstName} 👋
+          </p>
+          <div style={{
+            padding: '12px 14px', borderRadius: 12,
+            background: 'linear-gradient(135deg, rgba(22,27,34,0.95), rgba(13,17,23,0.9))',
+            border: '1px solid rgba(251,191,36,0.12)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+          }}>
+            <div>
+              <p style={{ fontSize: '0.58rem', color: '#8b949e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Leads Ativos</p>
+              <p style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fbbf24', lineHeight: 1.1, textShadow: '0 0 24px rgba(251,191,36,0.5)' }}>{stats.activeLeads}</p>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: '0.58rem', color: '#8b949e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Fechados</p>
+              <p style={{ fontSize: '1.6rem', fontWeight: 900, color: '#10b981', lineHeight: 1.1, textShadow: '0 0 24px rgba(16,185,129,0.4)' }}>{stats.closedLeads}</p>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: '0.58rem', color: '#8b949e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Hot Leads</p>
+              <p style={{ fontSize: '1.6rem', fontWeight: 900, color: '#ef4444', lineHeight: 1.1, textShadow: '0 0 24px rgba(239,68,68,0.4)' }}>{stats.hotLeads}</p>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: '0.58rem', color: '#8b949e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Conversão</p>
+              <p style={{ fontSize: '1.6rem', fontWeight: 900, color: '#38bdf8', lineHeight: 1.1, textShadow: '0 0 24px rgba(56,189,248,0.4)' }}>{stats.conversionRate}%</p>
+            </div>
+          </div>
         </div>
 
-        {activeTab === 'pipeline' && <PipelineView leads={leads} stats={stats} onLeadsChange={setLeads} />}
-        {activeTab === 'acoes'    && <AcoesView leads={leads} onLeadsChange={setLeads} />}
-        {activeTab === 'voz'      && <VozView leads={leads} />}
-        {activeTab === 'agenda'   && <AgendaView agenda={agenda} />}
-        {activeTab === 'radar'    && <RadarView leads={leads} />}
+        {/* ── Conteúdo das abas ── */}
+        <div style={{ padding: '0 16px' }}>
+          {activeTab === 'pipeline' && <PipelineView leads={leads} stats={stats} onLeadsChange={setLeads} />}
+          {activeTab === 'agenda'   && <AgendaView agenda={agenda} />}
+          {activeTab === 'radar'    && <RadarView leads={leads} />}
+          {activeTab === 'voz'      && <VozView leads={leads} />}
+          {activeTab === 'lead'     && <NewLeadInline onDone={l => { setLeads([l,...leads]); setActiveTab('pipeline') }} />}
+          {activeTab === 'call'     && <LogCallInline leads={leads} />}
+          {activeTab === 'contract' && <ContractInline leads={leads} onDone={() => setActiveTab('pipeline')} />}
+        </div>
+        
+        {/* Bottom spacer for FAB */}
+        <div style={{ height: 100 }} />
+      </div>
+      </div>
       </div>
 
       <FABMenu active={activeTab} onChange={setActiveTab} />
@@ -935,8 +1188,10 @@ export default function MobileHubClient({ user, leads: initialLeads, stats, agen
       <style>{`
         @keyframes spin       { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         @keyframes pulse-gold { 0%,100%{box-shadow:0 0 6px rgba(251,191,36,0.6)} 50%{box-shadow:0 0 16px rgba(251,191,36,1)} }
+        @keyframes fadeInUp   { from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:translateY(0)} }
         select option { background: #0d1117; }
       `}</style>
-    </div>
+    </>
   )
 }
+

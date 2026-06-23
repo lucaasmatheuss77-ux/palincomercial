@@ -1,7 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { Package, Plus, Trash2, DollarSign, Tags } from 'lucide-react'
+import { 
+  Package, Plus, Trash2, DollarSign, Tags,
+  FileText, Zap, Shield, Search, RefreshCw,
+  Tractor, Briefcase, Landmark, Handshake, Calculator
+} from 'lucide-react'
 import { toast } from 'sonner'
 import ActionDialog from '@/components/action-dialog'
 import InsiderLogo from '@/components/insider-logo'
@@ -29,14 +33,45 @@ const CATEGORIES = [
   'Compliance',
   'Consultoria',
   'Educacional',
+  'Fiscal & Tributário',
   'ICMS',
+  'ICMS & Créditos',
   'Jurídico',
   'NR1',
+  'Parceria',
+  'Produtor Rural (PF)',
   'Tributário',
   'Tributos Federais',
 ]
 
 const COST_TYPES = ['Operacional', 'Captação', 'Fixo', 'Variável', 'Outro']
+
+function getProductIcon(name: string) {
+  const n = name.toLowerCase()
+  if (n.includes('icms') || n.includes('pis') || n.includes('cat 83')) return Calculator
+  if (n.includes('rural')) return Tractor
+  if (n.includes('compliance')) return Shield
+  if (n.includes('consulta') || n.includes('análise')) return Search
+  if (n.includes('transferência') || n.includes('cessão')) return RefreshCw
+  if (n.includes('crédito') || n.includes('credito')) return Landmark
+  if (n.includes('parceria')) return Handshake
+  if (n.includes('intermediação')) return Briefcase
+  return Package
+}
+
+function getProductColor(name: string) {
+  const n = name.toLowerCase()
+  if (n.includes('icms')) return '#38bdf8'
+  if (n.includes('pis') || n.includes('cat 83')) return '#fb7185'
+  if (n.includes('rural')) return '#10b981'
+  if (n.includes('compliance')) return '#f59e0b'
+  if (n.includes('consulta') || n.includes('análise')) return '#a855f7'
+  if (n.includes('transferência') || n.includes('cessão')) return '#6366f1'
+  if (n.includes('crédito') || n.includes('credito')) return '#2dd4bf'
+  if (n.includes('parceria')) return '#f43f5e'
+  if (n.includes('intermediação')) return '#8b5cf6'
+  return '#adbac7'
+}
 
 export default function ProdutosClient({ initialProducts }: { initialProducts: Product[] }) {
   const [products, setProducts] = useState(initialProducts)
@@ -237,7 +272,7 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                   className="glass-card"
                   style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
                 >
-                  <div style={{ height: '3px', background: `linear-gradient(90deg, ${product.color}, transparent)` }} />
+                  <div style={{ height: '3px', background: `linear-gradient(90deg, ${getProductColor(product.name)}, transparent)` }} />
                   <div style={{ padding: '18px 20px 16px', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
                     {/* Product header */}
@@ -245,14 +280,13 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                       <span style={{
                         width: '42px', height: '42px', borderRadius: '12px',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '1.2rem', background: `${product.color}18`, border: `1px solid ${product.color}30`,
-                        flexShrink: 0,
+                        background: `${getProductColor(product.name)}18`, border: `1px solid ${getProductColor(product.name)}30`,
+                        flexShrink: 0, color: getProductColor(product.name)
                       }}>
-                        {product.name.toLowerCase().includes('insider') ? (
-                          <InsiderLogo size={24} color={product.color} />
-                        ) : (
-                          product.emoji
-                        )}
+                        {(() => {
+                           const IconComponent = getProductIcon(product.name)
+                           return <IconComponent size={20} />
+                        })()}
                       </span>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <h3 style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--brand-text)', lineHeight: 1.3 }}>{product.name}</h3>
@@ -265,8 +299,8 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: '5px',
                         padding: '4px 10px', borderRadius: '999px',
-                        background: `${product.color}12`, border: `1px solid ${product.color}25`,
-                        color: product.color, fontSize: '0.7rem', fontWeight: 700,
+                        background: `${getProductColor(product.name)}12`, border: `1px solid ${getProductColor(product.name)}25`,
+                        color: getProductColor(product.name), fontSize: '0.7rem', fontWeight: 700,
                       }}>
                         <Tags size={10} />
                         {product.category || 'Sem categoria'}

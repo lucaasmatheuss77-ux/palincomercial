@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────────────
 
 export type ClubMember = {
   id: string
@@ -16,7 +16,6 @@ export type ClubMember = {
   notes: string | null
   created_at: string
   updated_at: string
-  // Joined fields
   client?: {
     id: string
     name: string
@@ -44,7 +43,6 @@ export type ClubDeliverable = {
   event_id: string | null
   created_at: string
   updated_at: string
-  // Joined
   event?: {
     id: string
     name: string
@@ -54,7 +52,39 @@ export type ClubDeliverable = {
   } | null
 }
 
+// Conexão armazenada em JSON dentro do campo notes
+export type ClubConnection = {
+  id: string // uuid gerado no cliente
+  name: string
+  company: string | null
+  type: 'parceiro' | 'indicacao' | 'networking' | 'cliente'
+  date: string
+  notes: string | null
+}
+
+// Estrutura interna do campo notes do membro
+type NotesData = {
+  text: string | null
+  connections: ClubConnection[]
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function parseNotes(raw: string | null): NotesData {
+  if (!raw) return { text: null, connections: [] }
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed === 'object' && 'connections' in parsed) return parsed as NotesData
+    // era string pura, preserva como texto
+    return { text: raw, connections: [] }
+  } catch {
+    return { text: raw, connections: [] }
+  }
+}
+
+function serializeNotes(data: NotesData): string {
+  return JSON.stringify(data)
+}
 
 function isInsiderClubProduct(productName?: string | null, productSlug?: string | null): boolean {
   const terms = ['insider', 'clube', 'mentoria']
@@ -62,7 +92,7 @@ function isInsiderClubProduct(productName?: string | null, productSlug?: string 
   return terms.some((t) => haystack.includes(t))
 }
 
-// ─── Members ─────────────────────────────────────────────────────────────────
+// ─── Members ──────────────────────────────────────────────────────────────────
 
 export async function getClubMembers(): Promise<{ success: boolean; data: ClubMember[]; error?: string }> {
   const supabase = await createClient()
@@ -83,7 +113,6 @@ export async function getClubMembers(): Promise<{ success: boolean; data: ClubMe
 export async function ensureClubMember(clientId: string): Promise<{ success: boolean; data?: ClubMember | null; isNew?: boolean; error?: string }> {
   const supabase = await createClient()
 
-  // Check if already exists
   const { data: existing } = await supabase
     .from('club_members')
     .select('*')
@@ -92,19 +121,12 @@ export async function ensureClubMember(clientId: string): Promise<{ success: boo
 
   if (existing) return { success: true, data: existing as ClubMember, isNew: false }
 
-  // Create new member
   const today = new Date().toISOString().split('T')[0]
   const oneYearLater = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
   const { data, error } = await supabase
     .from('club_members')
-    .insert({
-      client_id: clientId,
-      contract_start: today,
-      contract_end: oneYearLater,
-      status: 'ativo',
-      tier: 'standard',
-    })
+    .insert({ client_id: clientId, contract_start: today, contract_end: oneYearLater, status: 'ativo', tier: 'standard' })
     .select('*')
     .maybeSingle()
 
@@ -138,25 +160,64 @@ export async function updateClubMember(
   return { success: true }
 }
 
-export async function maybeCreateClubMemberFromClient(
-  clientId: string,
-  productId?: string | null
-): Promise<{ created: boolean }> {
+export async function maybeCreateClubMemberFromClient(clientId: string, productId?: string | null): Promise<{ created: boolean }> {
   if (!productId) return { created: false }
 
   const supabase = await createClient()
-
-  // Look up product name/slug
-  const { data: product } = await supabase
-    .from('products')
-    .select('name, slug')
-    .eq('id', productId)
-    .maybeSingle()
+  const { data: product } = await supabase.from('products').select('name, slug').eq('id', productId).maybeSingle()
 
   if (!isInsiderClubProduct(product?.name, product?.slug)) return { created: false }
 
   const result = await ensureClubMember(clientId)
   return { created: result.isNew === true }
+}
+
+// ─── Connections (stored in notes JSON) ───────────────────────────────────────
+
+export async function getMemberConnections(memberId: string): Promise<{ success: boolean; data: ClubConnection[]; notes: string | null }> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.from('club_members').select('notes').eq('id', memberId).maybeSingle()
+  if (error) return { success: false, data: [], notes: null }
+  const parsed = parseNotes((data as { notes: string | null } | null)?.notes ?? null)
+  return { success: true, data: parsed.connections, notes: parsed.text }
+}
+
+export async function addMemberConnection(memberId: string, connection: Omit<ClubConnection, 'id'>): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient()
+  const { data: row } = await supabase.from('club_members').select('notes').eq('id', memberId).maybeSingle()
+  const parsed = parseNotes((row as { notes: string | null } | null)?.notes ?? null)
+
+  const newConn: ClubConnection = {
+    ...connection,
+    id: crypto.randomUUID(),
+  }
+  parsed.connections = [newConn, ...parsed.connections]
+
+  const { error } = await supabase
+    .from('club_members')
+    .update({ notes: serializeNotes(parsed), updated_at: new Date().toISOString() })
+    .eq('id', memberId)
+
+  if (error) return { success: false, error: error.message }
+  revalidatePath('/dashboard/clube')
+  return { success: true }
+}
+
+export async function removeMemberConnection(memberId: string, connectionId: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient()
+  const { data: row } = await supabase.from('club_members').select('notes').eq('id', memberId).maybeSingle()
+  const parsed = parseNotes((row as { notes: string | null } | null)?.notes ?? null)
+
+  parsed.connections = parsed.connections.filter((c) => c.id !== connectionId)
+
+  const { error } = await supabase
+    .from('club_members')
+    .update({ notes: serializeNotes(parsed), updated_at: new Date().toISOString() })
+    .eq('id', memberId)
+
+  if (error) return { success: false, error: error.message }
+  revalidatePath('/dashboard/clube')
+  return { success: true }
 }
 
 // ─── Deliverables ─────────────────────────────────────────────────────────────
@@ -176,19 +237,17 @@ export async function getClubDeliverables(): Promise<{ success: boolean; data: C
   return { success: true, data: (data || []) as ClubDeliverable[] }
 }
 
-export async function upsertDeliverable(
-  deliverable: {
-    id?: string
-    title: string
-    description?: string | null
-    category: 'mentoria' | 'conteudo' | 'material' | 'evento'
-    due_date?: string | null
-    status?: 'pendente' | 'concluido' | 'atrasado'
-    is_global?: boolean
-    member_id?: string | null
-    event_id?: string | null
-  }
-): Promise<{ success: boolean; error?: string }> {
+export async function upsertDeliverable(deliverable: {
+  id?: string
+  title: string
+  description?: string | null
+  category: 'mentoria' | 'conteudo' | 'material' | 'evento'
+  due_date?: string | null
+  status?: 'pendente' | 'concluido' | 'atrasado'
+  is_global?: boolean
+  member_id?: string | null
+  event_id?: string | null
+}): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient()
 
   const payload = {
@@ -207,7 +266,6 @@ export async function upsertDeliverable(
     : await supabase.from('club_deliverables').insert(payload)
 
   if (error) return { success: false, error: error.message }
-
   revalidatePath('/dashboard/clube')
   return { success: true }
 }
@@ -222,22 +280,19 @@ export async function toggleDeliverableDone(id: string, currentStatus: string): 
     .eq('id', id)
 
   if (error) return { success: false, error: error.message }
-
   revalidatePath('/dashboard/clube')
   return { success: true }
 }
 
 export async function deleteDeliverable(id: string): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient()
-
   const { error } = await supabase.from('club_deliverables').delete().eq('id', id)
   if (error) return { success: false, error: error.message }
-
   revalidatePath('/dashboard/clube')
   return { success: true }
 }
 
-// ─── Events visible in the club ───────────────────────────────────────────────
+// ─── Events ───────────────────────────────────────────────────────────────────
 
 type ClubEventRow = {
   id: string
@@ -252,7 +307,6 @@ type ClubEventRow = {
 export async function getClubEvents(): Promise<{ success: boolean; data: ClubEventRow[]; error?: string }> {
   const supabase = await createClient()
 
-  // Get events that are linked via deliverables OR have Insider Club product
   const { data: linkedEventIds } = await supabase
     .from('club_deliverables')
     .select('event_id')
@@ -260,18 +314,10 @@ export async function getClubEvents(): Promise<{ success: boolean; data: ClubEve
 
   const ids = (linkedEventIds || []).map((d) => d.event_id).filter(Boolean)
 
-  // Also get events associated with the Insider Club product
-  const { data: products } = await supabase
-    .from('products')
-    .select('id')
-    .ilike('name', '%insider%')
-
+  const { data: products } = await supabase.from('products').select('id').ilike('name', '%insider%')
   const productIds = (products || []).map((p) => p.id)
 
-  let query = supabase
-    .from('events')
-    .select('*')
-    .order('date', { ascending: true })
+  let query = supabase.from('events').select('*').order('date', { ascending: true })
 
   if (ids.length > 0 || productIds.length > 0) {
     const allEventIds = [...new Set(ids)]
@@ -289,7 +335,6 @@ export async function getClubEvents(): Promise<{ success: boolean; data: ClubEve
   }
 
   const { data, error } = await query
-
   if (error) return { success: false, data: [], error: error.message }
   return { success: true, data: data || [] }
 }

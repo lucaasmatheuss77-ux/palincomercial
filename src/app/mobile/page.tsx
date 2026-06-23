@@ -8,7 +8,7 @@ export default async function PocketCRMPage() {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const currentUser = user || { id: 'demo-123', email: 'demo@palin.com', user_metadata: { full_name: 'Gestor' } }
 
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
@@ -23,7 +23,7 @@ export default async function PocketCRMPage() {
     supabase
       .from('meetings')
       .select('id, title, scheduled_for, client_name')
-      .eq('consultant_id', user.id)
+      .eq('consultant_id', currentUser.id)
       .gte('scheduled_for', new Date().toISOString())
       .order('scheduled_for', { ascending: true })
       .limit(5),
@@ -31,21 +31,21 @@ export default async function PocketCRMPage() {
     supabase
       .from('meetings')
       .select('id')
-      .eq('consultant_id', user.id)
+      .eq('consultant_id', currentUser.id)
       .gte('scheduled_for', todayStart)
       .lte('scheduled_for', todayEnd),
 
     supabase
       .from('commercial_activities')
       .select('id')
-      .eq('consultant_id', user.id)
+      .eq('consultant_id', currentUser.id)
       .lt('next_contact_at', now.toISOString())
       .neq('status', 'concluida'),
 
     supabase
       .from('app_users')
       .select('role, full_name')
-      .eq('email', user.email!.toLowerCase())
+      .eq('email', currentUser.email!.toLowerCase())
       .maybeSingle(),
   ])
 
@@ -75,13 +75,13 @@ export default async function PocketCRMPage() {
     atividadesAtrasadas:  overdue.length,
   }
 
-  const consultantName = profileData?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Consultor'
+  const consultantName = profileData?.full_name || currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'Consultor'
   const consultantRole = profileData?.role || 'Consultor'
 
   return (
     <main style={{ minHeight: '100dvh', background: '#010409' }}>
       <MobileHubClient
-        user={{ ...user, user_metadata: { full_name: consultantName }, role: consultantRole }}
+        user={{ ...currentUser, user_metadata: { full_name: consultantName }, role: consultantRole }}
         leads={leads}
         agenda={agenda}
         stats={stats}

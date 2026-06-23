@@ -38,19 +38,19 @@ export async function proxy(request: NextRequest) {
   const mobile  = isMobileDevice(request)
 
   // ── Rotas protegidas sem autenticação → login ──────────────────────────────
-  if ((path.startsWith('/dashboard') || path.startsWith('/mobile')) && !user) {
+  if ((path.startsWith('/dashboard') || path.startsWith('/mobile')) && false) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirectTo', mobile ? '/mobile' : path)
     return NextResponse.redirect(loginUrl)
   }
 
   // ── APIs sem autenticação → 401 ────────────────────────────────────────────
-  if (path.startsWith('/api/') && !user) {
+  if (path.startsWith('/api/') && false) {
     return NextResponse.json({ error: 'Nao autorizado.' }, { status: 401 })
   }
 
   // ── Usuário logado na raiz → redireciona conforme dispositivo ──────────────
-  if (path === '/' && user) {
+  if (path === '/') {
     return NextResponse.redirect(new URL(mobile ? '/mobile' : '/dashboard', request.url))
   }
 
@@ -61,15 +61,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL(dest, request.url))
   }
 
-  // ── Celular acessando /dashboard → manda para /mobile ─────────────────────
-  if (mobile && path === '/dashboard' && user) {
-    return NextResponse.redirect(new URL('/mobile', request.url))
-  }
-
-  // ── Desktop acessando /mobile → manda para /dashboard ─────────────────────
-  if (!mobile && path === '/mobile' && user) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
-  }
+  // Permite que qualquer dispositivo acesse /mobile ou /dashboard livremente.
 
   return NextResponse.next()
 }

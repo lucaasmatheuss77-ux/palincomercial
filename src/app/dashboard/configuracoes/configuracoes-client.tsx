@@ -14,15 +14,14 @@ import { createClient } from '@/lib/supabase/client'
 import { uploadAvatar, removeAvatar, updateProfileName, getMyProfile } from '@/app/actions/profile'
 
 const UsuariosSection      = dynamic(() => import('./usuarios-section'),       { ssr: false })
-const AvatarCreatorSection = dynamic(() => import('./AvatarCreatorSection'),   { ssr: false })
 
 const sections = [
-  { icon: User,    key: 'perfil',        label: 'Perfil do Gestor',        desc: 'Dados pessoais e credenciais de acesso' },
+  { icon: User,    key: 'perfil',        label: 'Perfil do Usuario',       desc: 'Dados pessoais e credenciais de acesso' },
   { icon: Users,   key: 'usuarios',      label: 'Usuarios',                desc: 'Gerencie os membros e permissoes do time' },
-  { icon: Palette, key: 'interface',     label: 'Interface e Temas',       desc: 'Ajustes visuais e densidade de dados' },
+  { icon: Palette, key: 'interface',     label: 'Aparencia e UI',          desc: 'Personalize cores, temas e layout' },
+  { icon: Bell,    key: 'notificacoes',  label: 'Notificacoes',            desc: 'Preferencias de alertas e emails' },
   { icon: Shield,  key: 'seguranca',     label: 'Seguranca e Auditoria',   desc: 'Logs de acesso e seguranca da conta' },
-  { icon: Bell,    key: 'notificacoes',  label: 'Notificacoes',            desc: 'Alertas de CRM, ranking e metas' },
-  { icon: Globe,   key: 'global',        label: 'Globalizacao',            desc: 'Idiomas, fusos horarios e moedas' },
+  { icon: Globe,   key: 'global',        label: 'Idioma e Fuso Horario',   desc: 'Localizacao e formato de data/hora' },
 ] as const
 
 type SectionKey = (typeof sections)[number]['key']
@@ -319,15 +318,6 @@ function PerfilSection() {
         </button>
       </div>
 
-      {/* ── Criador de Avatar ── */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '32px' }}>
-        <AvatarCreatorSection
-          initialSkin={avatarSkin}
-          initialAccessory={avatarAccessory}
-          role={role}
-          userName={name}
-        />
-      </div>
     </div>
   )
 }

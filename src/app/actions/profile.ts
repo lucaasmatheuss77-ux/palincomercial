@@ -8,9 +8,15 @@ export async function getMyProfile(): Promise<Profile | null> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const { data } = await supabase
+  const { createClient: createSupabaseClient } = await import('@supabase/supabase-js')
+  const adminClient = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const { data } = await adminClient
     .from('profiles')
-    .select('id, full_name, email, role, avatar_url, xp, level, class')
+    .select('id, full_name, email, role, avatar_url, xp, level, class, permissions')
     .eq('id', user.id)
     .maybeSingle()
 

@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
     `${LAN_IP}`,
     `localhost:${DEV_PORT}`,
     'localhost',
+    '10.24.2.148',
+    '10.24.2.148:80',
+    '10.24.2.127',
+    '10.24.2.127:80',
+    '192.168.0.245',
+    '192.168.0.245:80',
   ],
   async headers() {
     const isDev = process.env.NODE_ENV === 'development'
@@ -22,9 +28,15 @@ const nextConfig: NextConfig = {
       'https://api.openai.com',
       'https://brasilapi.com.br',
       'https://nominatim.openstreetmap.org',
+      'https://ipapi.co',
+      'http://ip-api.com',
       ...(isDev ? [
         `ws://${LAN_IP}:${DEV_PORT}`,
         `http://${LAN_IP}:${DEV_PORT}`,
+        `ws://192.168.0.245:${DEV_PORT}`,
+        `http://192.168.0.245:${DEV_PORT}`,
+        `ws://10.24.2.127:${DEV_PORT}`,
+        `http://10.24.2.127:${DEV_PORT}`,
         'ws://localhost:*',
       ] : []),
     ].join(' ')

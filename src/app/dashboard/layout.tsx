@@ -12,6 +12,7 @@ import {
   CalendarDays,
   FileText,
   Gauge,
+  LineChart,
   LogOut,
   Package,
   PartyPopper,
@@ -35,6 +36,7 @@ type NavItem = {
   accent: string
   icon: LucideIcon | null
   customIcon?: (color: string) => React.ReactNode
+  adminOnly?: boolean
 }
 
 const navItems: NavItem[] = [
@@ -42,16 +44,14 @@ const navItems: NavItem[] = [
   { href: '/dashboard/produtos', label: 'Produtos', icon: Package, accent: '#10b981' },
   { href: '/dashboard/clientes', label: 'Clientes', icon: FileText, accent: '#38bdf8' },
   { href: '/dashboard/pipeline', label: 'CRM', icon: Rocket, accent: '#f97316' },
-  { href: '/dashboard/perfil-cliente', label: 'Perfil Cliente', icon: UserSearch, accent: '#3b82f6' },
   { href: '/dashboard/agenda', label: 'Reunioes', icon: CalendarDays, accent: '#22c55e' },
   { href: '/dashboard/eventos', label: 'Eventos', icon: PartyPopper, accent: '#14b8a6' },
   { href: '/dashboard/clube', label: 'Clube', icon: null, accent: '#0ea5e9', customIcon: (color: string) => <InsiderLogo size={17} color={color} /> },
   { href: '/dashboard/metas', label: 'Metas', icon: Target, accent: '#e879f9' },
   { href: '/dashboard/comissoes', label: 'Comissoes', icon: BadgeDollarSign, accent: '#fb7185' },
-  { href: '/dashboard/equipe', label: 'Time', icon: Users2, accent: '#34d399' },
   { href: '/dashboard/relatorios', label: 'Relatorios', icon: BarChart3, accent: '#38bdf8' },
-  { href: '/dashboard/configuracoes', label: 'Configuracoes', icon: Settings, accent: '#94a3b8' },
-
+  { href: '/dashboard/indicadores', label: 'Indicadores', icon: LineChart, accent: '#059669' },
+  { href: '/dashboard/planejamento', label: 'Planejamento', icon: Target, accent: '#f43f5e' },
 ]
 
 import GlobalCelebration from '@/components/global-celebration'
@@ -63,9 +63,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isNavCompact, setIsNavCompact] = useState(false)
   const [isAgendaOpen, setIsAgendaOpen] = useState(false)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
     getMyProfile().then(setProfile).catch(() => {})
+    // Captura o userId para autenticar o assistente mesmo no mobile via IP
+    const supabaseClient = createClient()
+    supabaseClient.auth.getUser().then(({ data }) => {
+      if (data?.user?.id) setUserId(data.user.id)
+    }).catch(() => {})
   }, [])
 
 
@@ -134,8 +140,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <BrandLogo height={50} compact={false} showSubtitle />
           </Link>
 
-          {/* Notification Bell */}
-          <NotificationBell />
+          {/* Actions: Notifications + Settings (Centered) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
+            <NotificationBell />
+            <Link
+              href="/dashboard/configuracoes"
+              title="Configurações"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 38, height: 38, borderRadius: '50%',
+                background: 'rgba(255,255,255,0.05)',
+                color: '#adbac7',
+                textDecoration: 'none',
+                transition: 'all 0.2s',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
+            >
+              <Settings size={20} />
+            </Link>
+          </div>
 
           {/* Profile Avatar — links to Configurações */}
           <Link
@@ -178,12 +201,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {profile?.full_name ? profile.full_name.charAt(0).toUpperCase() : <UserCircle2 size={18} />}
               </div>
             )}
-            <div>
-              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--brand-text)', lineHeight: 1.2 }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--brand-text)' }}>
                 {profile?.full_name?.split(' ')[0] || 'Perfil'}
-              </div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--brand-muted)', lineHeight: 1.2 }}>
-                {profile?.role || 'Configurações'}
               </div>
             </div>
           </Link>
@@ -288,7 +308,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </button>
       )}
 
-      <AgendaAssistantPanel isOpen={isAgendaOpen} onClose={() => setIsAgendaOpen(false)} />
+      <AgendaAssistantPanel isOpen={isAgendaOpen} onClose={() => setIsAgendaOpen(false)} userId={userId} />
 
       <style>{`
         .no-scrollbar::-webkit-scrollbar { display: none; }

@@ -527,7 +527,7 @@ export default function DashboardClient({
         </div>
 
         {/* Mix de Servicos — Donut + legenda */}
-        <div className="glass-card" style={{ padding: '18px 20px' }}>
+        <div className="glass-card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
             <h3 style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--brand-text)', letterSpacing: '0.02em' }}>
               {isProductMode ? 'PARTICIPAÇÃO DO SERVIÇO' : 'MIX DE SERVIÇOS'}
@@ -545,28 +545,51 @@ export default function DashboardClient({
                 </div>
               )
             }
+            const lowestProduct = [...filteredProducts].sort((a, b) => Number(a.value || 0) - Number(b.value || 0))[0]
             return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                <div style={{ flexShrink: 0, width: '150px', height: '150px', borderRadius: '50%', background: donutSegments.length ? `conic-gradient(${donutSegments.join(', ')})` : 'rgba(255,255,255,0.04)', padding: '14px', boxSizing: 'border-box' }}>
-                  <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                  <div style={{ flexShrink: 0, width: '130px', height: '130px', borderRadius: '50%', background: donutSegments.length ? `conic-gradient(${donutSegments.join(', ')})` : 'rgba(255,255,255,0.04)', padding: '12px', boxSizing: 'border-box' }}>
+                    <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)' }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: '100px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {filteredProducts.map((item, idx) => (
+                      <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                          width: '10px', height: '10px', borderRadius: '3px', flexShrink: 0,
+                          background: item.color || colors[idx % colors.length],
+                          boxShadow: `0 0 6px ${item.color || colors[idx % colors.length]}66`,
+                        }} />
+                        <span style={{ flex: 1, fontSize: '0.78rem', color: '#c9d1d9', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.name}
+                        </span>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--brand-primary)', fontWeight: 800, flexShrink: 0 }}>
+                          {item.value}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ flex: 1, minWidth: '100px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {filteredProducts.map((item, idx) => (
-                    <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{
-                        width: '10px', height: '10px', borderRadius: '3px', flexShrink: 0,
-                        background: item.color || colors[idx % colors.length],
-                        boxShadow: `0 0 6px ${item.color || colors[idx % colors.length]}66`,
-                      }} />
-                      <span style={{ flex: 1, fontSize: '0.78rem', color: '#c9d1d9', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {item.name}
-                      </span>
-                      <span style={{ fontSize: '0.82rem', color: 'var(--brand-primary)', fontWeight: 800, flexShrink: 0 }}>
-                        {item.value}%
-                      </span>
+                {lowestProduct && !isProductMode && (
+                  <div style={{ 
+                    marginTop: 'auto', 
+                    padding: '12px', 
+                    background: 'rgba(239, 68, 68, 0.08)', 
+                    border: '1px solid rgba(239, 68, 68, 0.2)', 
+                    borderRadius: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px'
+                  }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <AlertCircle size={12} />
+                      Atenção ao Mix
                     </div>
-                  ))}
-                </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--brand-text)' }}>
+                      💡 Focar em vender mais <strong>{lowestProduct.name}</strong>, que está com apenas {lowestProduct.value}% de participação.
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })()}

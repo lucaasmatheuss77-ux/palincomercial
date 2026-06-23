@@ -28,9 +28,7 @@ export async function createEvent(data: {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { success: false, error: 'Nao autorizado.' }
     
-    // We get the profile id of the user to log created_by
-    const { data: profile } = await supabase.from('profiles').select('id').eq('id', user.id).single()
-
+    // Use user.id directly instead of querying profiles, which could throw due to RLS
     const { error, data: createdEvent } = await supabase.from('events').insert({
       name: data.name.trim(),
       type: data.tipo ?? 'proprio',
@@ -40,7 +38,7 @@ export async function createEvent(data: {
       status: data.status ?? 'planejamento',
       product_id: data.product_id || null,
       description: data.description || '',
-      created_by: profile?.id || user.id,
+      created_by: user.id,
       ends_at: data.ends_at ? new Date(data.ends_at).toISOString() : null,
       organizer_name: data.organizer_name || null,
       organizer_contact: data.organizer_contact || null,

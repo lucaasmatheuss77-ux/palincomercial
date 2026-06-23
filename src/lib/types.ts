@@ -7,6 +7,8 @@ export type Profile = {
   xp: number
   level: number
   class: string
+  planejamento_access?: boolean
+  permissions?: any
 }
 
 export interface EventDbResult {

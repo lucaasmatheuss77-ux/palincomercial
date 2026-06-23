@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
 export type AppUser = {
   id: string
@@ -41,7 +42,7 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 export async function listUsers(): Promise<AppUser[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
-    .from('app_users')
+    .from('profiles')
     .select('*')
     .order('created_at', { ascending: false })
 
@@ -78,9 +79,6 @@ export async function createUser(data: {
 }): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { success: false, error: 'Nao autorizado.' }
-
   if (!emailRegex.test(data.email.trim())) {
     return { success: false, error: 'Formato de e-mail invalido.' }
   }
@@ -91,8 +89,13 @@ export async function createUser(data: {
 
   const emailNorm = data.email.trim().toLowerCase()
 
-  const { data: existing } = await supabase
-    .from('app_users')
+  const adminAuthClient = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const { data: existing } = await adminAuthClient
+    .from('profiles')
     .select('id')
     .eq('email', emailNorm)
     .maybeSingle()
@@ -101,9 +104,25 @@ export async function createUser(data: {
     return { success: false, error: 'Ja existe um usuario com este e-mail.' }
   }
 
-  const { data: inserted, error: insertError } = await supabase
-    .from('app_users')
+
+
+  // 1. Tenta criar o usuário no Supabase Auth primeiro
+  const { data: authData, error: authError } = await adminAuthClient.auth.admin.createUser({
+    email: emailNorm,
+    password: 'Palin@123',
+    email_confirm: true,
+    user_metadata: { full_name: data.full_name.trim() }
+  })
+
+  // Se der erro que não seja 'email_exists', retorna o erro
+  if (authError && authError.code !== 'email_exists' && !authError.message.includes('already registered')) {
+    return { success: false, error: `Erro Auth: ${authError.message}` }
+  }
+
+  const { data: inserted, error: insertError } = await adminAuthClient
+    .from('profiles')
     .insert({
+      id: authData.user?.id, // MUST provide the id from Auth since profiles uses it!
       full_name: data.full_name.trim(),
       email: emailNorm,
       role: data.role,
@@ -131,7 +150,7 @@ export async function createUser(data: {
       can_edit: p.can_edit,
       can_delete: p.can_delete,
     }))
-    await supabase.from('user_permissions').insert(perms)
+    await adminAuthClient.from('user_permissions').insert(perms)
   }
 
   revalidatePath('/dashboard/configuracoes')
@@ -170,8 +189,13 @@ export async function updateUser(
 
   const emailNorm = data.email.trim().toLowerCase()
 
+  const adminAuthClient = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
   const { data: conflict } = await supabase
-    .from('app_users')
+    .from('profiles')
     .select('id')
     .eq('email', emailNorm)
     .neq('id', id)
@@ -181,8 +205,8 @@ export async function updateUser(
     return { success: false, error: 'Outro usuario ja usa este e-mail.' }
   }
 
-  const { error: updateError } = await supabase
-    .from('app_users')
+  const { error: updateError } = await adminAuthClient
+    .from('profiles')
     .update({
       full_name: data.full_name.trim(),
       email: emailNorm,
@@ -227,7 +251,7 @@ export async function toggleUserStatus(id: string, isActive: boolean): Promise<{
   if (!user) return { success: false, error: 'Nao autorizado.' }
 
   const { error } = await supabase
-    .from('app_users')
+    .from('profiles')
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
     .eq('id', id)
 
@@ -239,12 +263,16 @@ export async function toggleUserStatus(id: string, isActive: boolean): Promise<{
 
 export async function deleteUser(id: string): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient()
+  const adminAuthClient = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nao autorizado.' }
 
-  const { error } = await supabase
-    .from('app_users')
+  const { error } = await adminAuthClient
+    .from('profiles')
     .delete()
     .eq('id', id)
 
