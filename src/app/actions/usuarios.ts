@@ -163,14 +163,14 @@ export async function createUser(data: {
 
   let { data: inserted, error: insertError } = await adminAuthClient
     .from('profiles')
-    .insert(buildProfilePayload(authData.user?.id, { ...data, email: emailNorm }, true))
+    .upsert(buildProfilePayload(authData.user?.id, { ...data, email: emailNorm }, true), { onConflict: 'id' })
     .select('id')
     .single()
 
   if (insertError && isMissingProfileColumn(insertError)) {
     const retry = await adminAuthClient
       .from('profiles')
-      .insert(buildProfilePayload(authData.user?.id, { ...data, email: emailNorm }, false))
+      .upsert(buildProfilePayload(authData.user?.id, { ...data, email: emailNorm }, false), { onConflict: 'id' })
       .select('id')
       .single()
 
