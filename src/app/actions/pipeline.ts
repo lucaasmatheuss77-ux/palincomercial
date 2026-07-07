@@ -141,6 +141,7 @@ export async function updateLeadStage(leadId: string, newStage: string) {
         {
           lead: leadSnapshot,
           clientId: clientSnapshot?.id || (leadSnapshot as { client_id?: string | null } | null)?.client_id || null,
+          contractFields: { status: 'ativo', signed_at: new Date().toISOString() },
         }
       )
 
@@ -174,6 +175,7 @@ export async function updateLeadStage(leadId: string, newStage: string) {
           const contract = await upsertPendingContractFromDeal(supabase, deal, {
             lead,
             clientId: clientSnapshot?.id || (lead as { client_id?: string | null } | null)?.client_id || null,
+            contractFields: { status: 'ativo', signed_at: new Date().toISOString() },
           })
 
           if (contract) {

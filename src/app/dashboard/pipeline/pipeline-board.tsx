@@ -230,6 +230,15 @@ function formatCompactCurrency(value: number) {
   return formatCurrency(value)
 }
 
+function addMinutesToDateTimeLocal(value: string, minutes: number) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  date.setMinutes(date.getMinutes() + minutes)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 function maskCnpj(value: string) {
   const cleanValue = value.replace(/\D/g, '')
   return cleanValue
@@ -649,6 +658,7 @@ export default function PipelineBoard({
     owner_profile_id: '',
     requires_logistics: false,
   })
+  const [showMeetingFollowUp, setShowMeetingFollowUp] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [assistantDraft, setAssistantDraft] = useState('Quais leads devo atacar hoje?')
   const [assistantQuestion, setAssistantQuestion] = useState('Quais leads devo atacar hoje?')
@@ -1031,6 +1041,7 @@ export default function PipelineBoard({
       owner_profile_id: lead.consultant_id || '',
       requires_logistics: false,
     })
+    setShowMeetingFollowUp(false)
     setMeetingOpen(true)
   }
 
@@ -1092,6 +1103,7 @@ export default function PipelineBoard({
     setAssistantServerAnalysis(null)
     setAssistantServerMeta(null)
     setMeetingOpen(false)
+    setShowMeetingFollowUp(false)
     setSelectedLeadId(lead.id)
     setMeetingDraft((current) => ({
       ...current,
@@ -2767,91 +2779,197 @@ export default function PipelineBoard({
       <ActionDialog
         open={meetingOpen}
         title="Nova reunião do lead"
-        subtitle={selectedLead ? `Vinculada a ${selectedLead.name}` : 'Registrar pauta, conversa e próximo contato no CRM.'}
+        subtitle={selectedLead ? `Vinculada a ${selectedLead.name}` : 'Agende a reunião e defina a pauta com o lead.'}
         onClose={() => setMeetingOpen(false)}
+        width="620px"
         footer={
           <>
             <button type="button" className="btn-ghost" onClick={() => setMeetingOpen(false)}>Cancelar</button>
-            <button type="button" className="btn-primary" onClick={() => void handleCreateLeadMeeting()}>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!meetingDraft.title.trim() || !meetingDraft.scheduled_for}
+              onClick={() => void handleCreateLeadMeeting()}
+            >
               <CalendarDays size={16} />
-              Salvar reunião
+              Agendar reunião
             </button>
           </>
         }
       >
-        <div style={{ display: 'grid', gap: '12px' }}>
-          <input
-            className="input-field"
-            placeholder="Título da reunião"
-            value={meetingDraft.title}
-            onChange={(event) => setMeetingDraft((current) => ({ ...current, title: event.target.value }))}
-          />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gap: '22px' }}>
+          <label style={{ display: 'grid', gap: '6px' }}>
+            <span className="meeting-field-label">Título da reunião</span>
             <input
               className="input-field"
-              type="datetime-local"
-              value={meetingDraft.scheduled_for}
-              onChange={(event) => setMeetingDraft((current) => ({ ...current, scheduled_for: event.target.value }))}
+              placeholder="Ex.: Apresentação de proposta"
+              value={meetingDraft.title}
+              onChange={(event) => setMeetingDraft((current) => ({ ...current, title: event.target.value }))}
             />
-            <input
-              className="input-field"
-              type="datetime-local"
-              value={meetingDraft.ends_at}
-              onChange={(event) => setMeetingDraft((current) => ({ ...current, ends_at: event.target.value }))}
-            />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
-            <input
-              className="input-field"
-              placeholder="Local ou link"
-              value={meetingDraft.location}
-              onChange={(event) => setMeetingDraft((current) => ({ ...current, location: event.target.value }))}
-            />
-            <select
-              className="input-field"
-              value={meetingDraft.meeting_type}
-              onChange={(event) => setMeetingDraft((current) => ({ ...current, meeting_type: event.target.value }))}
-            >
-              {['Presencial', 'Online', 'Externa'].map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </div>
-          <textarea
-            className="input-field"
-            rows={3}
-            placeholder="Pauta da reunião"
-            value={meetingDraft.objective}
-            onChange={(event) => setMeetingDraft((current) => ({ ...current, objective: event.target.value }))}
-          />
-          <textarea
-            className="input-field"
-            rows={3}
-            placeholder="O que foi falado"
-            value={meetingDraft.notes}
-            onChange={(event) => setMeetingDraft((current) => ({ ...current, notes: event.target.value }))}
-          />
-          <textarea
-            className="input-field"
-            rows={3}
-            placeholder="Próximo passo comercial"
-            value={meetingDraft.next_step}
-            onChange={(event) => setMeetingDraft((current) => ({ ...current, next_step: event.target.value }))}
-          />
-          <input
-            className="input-field"
-            type="datetime-local"
-            value={meetingDraft.next_contact_at}
-            onChange={(event) => setMeetingDraft((current) => ({ ...current, next_contact_at: event.target.value }))}
-          />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#cbd5e1', fontSize: '0.9rem' }}>
-            <input
-              type="checkbox"
-              checked={meetingDraft.requires_logistics}
-              onChange={(event) => setMeetingDraft((current) => ({ ...current, requires_logistics: event.target.checked }))}
-            />
-            Precisa de apoio logístico
           </label>
+
+          <div style={{ display: 'grid', gap: '10px' }}>
+            <span className="meeting-section-label" style={{ color: '#60a5fa' }}>Quando</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span className="meeting-field-label">Início</span>
+                <input
+                  className="input-field"
+                  type="datetime-local"
+                  value={meetingDraft.scheduled_for}
+                  onChange={(event) => setMeetingDraft((current) => ({ ...current, scheduled_for: event.target.value }))}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span className="meeting-field-label">Término</span>
+                <input
+                  className="input-field"
+                  type="datetime-local"
+                  value={meetingDraft.ends_at}
+                  onChange={(event) => setMeetingDraft((current) => ({ ...current, ends_at: event.target.value }))}
+                />
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {[
+                { minutes: 30, label: '30 min' },
+                { minutes: 60, label: '1h' },
+                { minutes: 90, label: '1h30' },
+                { minutes: 120, label: '2h' },
+              ].map((option) => (
+                <button
+                  key={option.minutes}
+                  type="button"
+                  className="meeting-chip"
+                  disabled={!meetingDraft.scheduled_for}
+                  onClick={() => setMeetingDraft((current) => ({ ...current, ends_at: addMinutesToDateTimeLocal(current.scheduled_for, option.minutes) }))}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gap: '10px' }}>
+            <span className="meeting-section-label" style={{ color: '#86efac' }}>Onde e como</span>
+            <label style={{ display: 'grid', gap: '6px' }}>
+              <span className="meeting-field-label">Local ou link</span>
+              <input
+                className="input-field"
+                placeholder="Endereço, Google Meet, telefone..."
+                value={meetingDraft.location}
+                onChange={(event) => setMeetingDraft((current) => ({ ...current, location: event.target.value }))}
+              />
+            </label>
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <span className="meeting-field-label">Formato</span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {['Presencial', 'Online', 'Externa'].map((option) => {
+                  const active = meetingDraft.meeting_type === option
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setMeetingDraft((current) => ({ ...current, meeting_type: option }))}
+                      style={{
+                        flex: 1,
+                        padding: '9px 8px',
+                        borderRadius: '8px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: `1px solid ${active ? 'rgba(134,239,172,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                        background: active ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.03)',
+                        color: active ? '#86efac' : '#94a3b8',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {option}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#cbd5e1', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={meetingDraft.requires_logistics}
+                onChange={(event) => setMeetingDraft((current) => ({ ...current, requires_logistics: event.target.checked }))}
+              />
+              Precisa de apoio logístico (carro, deslocamento)
+            </label>
+          </div>
+
+          <label style={{ display: 'grid', gap: '6px' }}>
+            <span className="meeting-section-label" style={{ color: 'var(--brand-primary)' }}>Pauta da reunião</span>
+            <textarea
+              className="input-field"
+              rows={3}
+              placeholder="O que será tratado nesta reunião?"
+              value={meetingDraft.objective}
+              onChange={(event) => setMeetingDraft((current) => ({ ...current, objective: event.target.value }))}
+            />
+          </label>
+
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px' }}>
+            <button
+              type="button"
+              onClick={() => setShowMeetingFollowUp((value) => !value)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+                color: '#93c5fd',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+              }}
+            >
+              <ChevronRight size={14} style={{ transform: showMeetingFollowUp ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+              Registrar conversa e próximo passo (opcional)
+            </button>
+            {showMeetingFollowUp ? (
+              <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
+                <p style={{ color: '#64748b', fontSize: '0.76rem', lineHeight: 1.5, margin: 0 }}>
+                  Preencha estes campos depois que a reunião acontecer, ou deixe em branco por enquanto.
+                </p>
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span className="meeting-field-label">O que foi falado</span>
+                  <textarea
+                    className="input-field"
+                    rows={3}
+                    placeholder="Resumo da conversa"
+                    value={meetingDraft.notes}
+                    onChange={(event) => setMeetingDraft((current) => ({ ...current, notes: event.target.value }))}
+                  />
+                </label>
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span className="meeting-field-label">Próximo passo comercial</span>
+                  <textarea
+                    className="input-field"
+                    rows={2}
+                    placeholder="Qual a próxima ação com este lead?"
+                    value={meetingDraft.next_step}
+                    onChange={(event) => setMeetingDraft((current) => ({ ...current, next_step: event.target.value }))}
+                  />
+                </label>
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span className="meeting-field-label">Próximo contato agendado</span>
+                  <input
+                    className="input-field"
+                    type="datetime-local"
+                    value={meetingDraft.next_contact_at}
+                    onChange={(event) => setMeetingDraft((current) => ({ ...current, next_contact_at: event.target.value }))}
+                  />
+                </label>
+              </div>
+            ) : null}
+          </div>
         </div>
       </ActionDialog>
 

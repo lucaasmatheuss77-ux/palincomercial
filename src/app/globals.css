@@ -1133,6 +1133,38 @@ body {
   font-weight: 800;
   font-size: 0.82rem;
 }
+.meeting-field-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+.meeting-section-label {
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.meeting-chip {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid rgba(96,165,250,0.25);
+  background: rgba(96,165,250,0.08);
+  color: #93c5fd;
+  transition: all 0.15s;
+}
+.meeting-chip:hover:not(:disabled) {
+  background: rgba(96,165,250,0.16);
+  border-color: rgba(96,165,250,0.4);
+}
+.meeting-chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .analise-money {
   color: var(--brand-primary) !important;
   font-weight: 900;
