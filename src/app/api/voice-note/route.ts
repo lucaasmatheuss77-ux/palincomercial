@@ -1,3 +1,4 @@
+export const maxDuration = 60;
 import { NextResponse } from 'next/server'
 
 export type TriggerType = 'followup' | 'reuniao' | 'proposta' | 'urgente' | 'fechamento' | 'nota'
@@ -140,7 +141,6 @@ Regras:
               activity_type: meta.activityType,
               subject,
               summary:       fullSummary,
-              description:   transcription,
               next_step:     nextStep,
               status:        'registrada',
               created_at:    new Date().toISOString(),

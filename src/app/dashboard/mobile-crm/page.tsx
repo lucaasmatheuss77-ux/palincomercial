@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { listClienteOptions } from '@/app/actions/clientes'
 import MobileHubClient from './mobile-client'
 import { redirect } from 'next/navigation'
 
@@ -17,8 +18,9 @@ export default async function MobileHubPage() {
   const [leadsRes, agendaRes, meetingsTodayRes, overdueRes, profileRes] = await Promise.allSettled([
     supabase
       .from('leads')
-      .select('id, name, stage, whatsapp, estimated_value, created_at, ai_score, cnpj, segmento_especifico, company')
-      .order('updated_at', { ascending: false }),
+      .select('id, name, stage, whatsapp, expected_value, created_at, ai_score, cnpj, segmento_especifico, company')
+      .order('updated_at', { ascending: false })
+      .limit(10000),
 
     supabase
       .from('meetings')
@@ -64,11 +66,13 @@ export default async function MobileHubPage() {
 
   const consultantName = profileData?.full_name || currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'Consultor'
   const consultantRole = profileData?.role || 'Consultor'
+  const clientes = await listClienteOptions()
 
   return (
     <MobileHubClient
       user={{ ...currentUser, user_metadata: { full_name: consultantName }, role: consultantRole, avatar_skin: profileData?.avatar_skin }}
       leads={leads}
+      clientes={clientes}
       agenda={agenda}
       stats={{
         closedLeads:          closedLeads.length,

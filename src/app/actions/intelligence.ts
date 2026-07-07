@@ -28,13 +28,23 @@ export async function generateLeadIntelligence(leadId: string) {
       .order('created_at', { ascending: false })
       .limit(10)
 
+    const now = new Date();
+    let diasSemContato = 0;
+    if (activities && activities.length > 0) {
+      const lastActivityDate = new Date(activities[0].created_at);
+      diasSemContato = Math.floor((now.getTime() - lastActivityDate.getTime()) / (1000 * 3600 * 24));
+    } else {
+      const leadCreationDate = new Date(lead.created_at || now);
+      diasSemContato = Math.floor((now.getTime() - leadCreationDate.getTime()) / (1000 * 3600 * 24));
+    }
+
     const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) throw new Error('Chave de API da OpenAI não configurada')
 
-    // 3. Montar Prompt dos 4 Agentes
+    // 3. Montar Prompt Específico e Orientado a Ação
     const prompt = `
     Você é o Sistema de Inteligência Comercial da Palin & Martins Organização Tributária.
-    Analise o seguinte LEAD e gere um relatório coordenado entre seus 4 agentes especialistas.
+    Analise o seguinte LEAD e gere um relatório ESTRATÉGICO focado em AÇÕES CLARAS. O objetivo principal é dizer ao consultor O QUE FAZER, especialmente se o lead estiver esfriando.
 
     DADOS DO LEAD:
     - Nome: ${lead.name}
@@ -44,28 +54,47 @@ export async function generateLeadIntelligence(leadId: string) {
     - Faturamento Estimado: R$ ${lead.faturamento_estimado || 0}
     - Segmento: ${lead.segmento_especifico || 'Não informado'}
     - Produto de Interesse: ${lead.products?.name || 'Geral'}
+    - Etapa do Funil: ${lead.stage || 'Não informada'}
+    - Dias sem contato: ${diasSemContato} dias
     - Notas Atuais: ${lead.notes || 'Nenhuma'}
 
     HISTÓRICO DE ATIVIDADES:
-    ${activities?.map(a => `- ${a.activity_type}: ${a.description}`).join('\n') || 'Sem interações registradas.'}
+    ${activities?.map(a => `- ${new Date(a.created_at).toLocaleDateString('pt-BR')}: ${a.activity_type} - ${a.description}`).join('\n') || 'Sem interações registradas.'}
 
-    ESTRUTURA DO RELATÓRIO (MANDATÓRIO):
+    MANDATÓRIO: O cliente está a ${diasSemContato} dias sem contato. 
+    Se "Dias sem contato" for maior que 5 (para leads em funil) ou se não houver histórico, ATIVE LUZ VERMELHA DE ATENÇÃO. Seja prescritivo e direto.
 
-    ### 1. AGENTE 1 — PROSPECÇÃO & QUALIFICAÇÃO
-    Avalie o Fit de ICP (Ideal Customer Profile). Identifique se o regime tributário e faturamento condizem com nossas especialidades.
-    Dê um SCORE de 0 a 100 para o lead.
+    ESTRUTURA DO RELATÓRIO (MANDATÓRIO, USE EXATAMENTE ESTES CABEÇALHOS):
 
-    ### 2. AGENTE 2 — ESTRATÉGIA DE PIPELINE & CRM
-    Defina a melhor próxima abordagem. Crie um gancho mental para a próxima reunião/ligação. Sugira a urgência no funil.
+    ### 🚨 STATUS E URGÊNCIA
+    Destaque se o lead está quente, morno ou esquecido. Se o alerta vermelho estiver ativo, escreva "[ALERTA VERMELHO] Lead sem contato há ${diasSemContato} dias!" e explique o risco de perda.
 
-    ### 3. AGENTE 3 — KPIs, METAS & VALOR FINANCEIRO
-    Estime o potencial de recuperação tributária ou valor de contrato recorrente baseado no faturamento e segmento. Projete o ROI para o cliente.
+    ### 🎯 PLANO DE AÇÃO IMEDIATO (PRIORIDADES)
+    Liste exatamente o que o consultor precisa fazer AGORA para avançar o negócio. Seja acionável. Exemplo:
+    1º Ligar para X e perguntar sobre Y.
+    2º Enviar e-mail de follow-up com o material Z.
+    3º Preparar simulação de crédito.
 
-    ### 4. AGENTE 4 — PÓS-VENDA, RETENÇÃO & UPSELL
-    Quais outros produtos da Palin podemos oferecer no futuro (Cross-sell)? Como garantir que este cliente fique conosco por 22+ anos?
+    ### 💰 FIT E POTENCIAL FINANCEIRO
+    Score de ICP (0 a 100), resumo rápido do porquê esse lead tem valor e expectativa de ROI.
 
-    RESPONDA EM PORTUGUÊS DO BRASIL. Formate com Markdown rico. No final, retorne um objeto JSON puro para extração de dados com os campos: 
-    { "score": number, "match_icp": number, "prioridade": "baixa"|"media"|"alta", "dor_principal": string, "potencial_financeiro": string }
+    ### 🔄 OPORTUNIDADES DE CROSS-SELL
+    Baseado no segmento e regime, quais outros serviços da Palin podem ser encaixados na mesma abordagem?
+
+    RESPONDA EM PORTUGUÊS DO BRASIL com Markdown rico.
+    No final, RETORNE UM OBJETO JSON PURO para o sistema renderizar no Frontend. 
+    Estrutura JSON esperada:
+    {
+      "score": number,
+      "match_icp": number,
+      "prioridade": "baixa"|"media"|"alta",
+      "dor_principal": string,
+      "potencial_financeiro": string,
+      "dias_sem_contato": number,
+      "alerta_vermelho": boolean,
+      "acoes_recomendadas": ["Ação acionável 1", "Ação acionável 2"],
+      "cor_indicativa": "verde"|"amarelo"|"vermelho"
+    }
     `
 
     // 4. Chamada a OpenAI
@@ -77,21 +106,31 @@ export async function generateLeadIntelligence(leadId: string) {
       },
       body: JSON.stringify({
         model: 'gpt-4o',
-        messages: [{ role: 'system', content: prompt }],
-        temperature: 0.7
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.6
       })
     })
 
     const aiResult = await response.json()
-    const fullMarkdown = aiResult.choices[0].message.content
+    if (!response.ok) {
+      throw new Error(`OpenAI error: ${aiResult.error?.message || response.statusText}`);
+    }
+    const fullMarkdown = aiResult.choices?.[0]?.message?.content || '{}'
 
     // 5. Extrair JSON do final da resposta (melhorado)
-    let extractedData = { score: 50, match_icp: 50, prioridade: 'media', dor_principal: 'Não identificada', potencial_financeiro: 'A avaliar' }
+    let extractedData = { 
+      score: 50, match_icp: 50, prioridade: 'media', 
+      dor_principal: 'Não identificada', potencial_financeiro: 'A avaliar',
+      dias_sem_contato: diasSemContato, alerta_vermelho: diasSemContato > 5,
+      acoes_recomendadas: ['Retomar contato e entender momento'],
+      cor_indicativa: 'amarelo'
+    }
     try {
       const jsonMatch = fullMarkdown.match(/\{[\s\S]*?\}/g)
       if (jsonMatch) {
          const lastJson = jsonMatch[jsonMatch.length - 1]
-         extractedData = JSON.parse(lastJson)
+         const parsed = JSON.parse(lastJson)
+         extractedData = { ...extractedData, ...parsed }
       }
     } catch (e) {
       console.warn('Falha ao extrair JSON da IA:', e)
@@ -112,18 +151,15 @@ export async function generateLeadIntelligence(leadId: string) {
       supabase.from('ai_qualifications').upsert({
         lead_id: leadId,
         score: extractedData.score,
-        match_icp: extractedData.match_icp,
-        prioridade_comercial: extractedData.prioridade,
-        dor_principal: extractedData.dor_principal,
-        potencial_financeiro_detalhado: extractedData.potencial_financeiro,
-        summary: fullMarkdown.split('###')[1]?.trim().slice(0, 500) || 'Análise gerada',
-        status: 'avaliado',
-        updated_at: new Date().toISOString()
+        status: extractedData.cor_indicativa || (extractedData.alerta_vermelho ? 'vermelho' : 'verde'),
+        source: 'Aura Pro',
+        summary: `Prioridade: ${extractedData.prioridade}. Dor: ${extractedData.dor_principal}.`,
+        reviewed_at: new Date().toISOString()
       }, { onConflict: 'lead_id' })
     ])
 
     revalidatePath('/dashboard/pipeline')
-    return { success: true, report: fullMarkdown }
+    return { success: true, report: fullMarkdown, data: extractedData }
   } catch (error) {
     console.error('Erro ao gerar inteligência:', error)
     return { success: false, error: 'Falha na análise da IA' }
@@ -167,4 +203,36 @@ export async function getIntelligenceHistory(leadId: string) {
     return []
   }
   return data
+}
+
+/**
+ * Busca os planos de ação e relatórios da IA para uma lista de leads.
+ * Útil para popular alertas no painel "Atenção Requerida".
+ */
+export async function getUrgentLeadsActionPlans(leadIds: string[]) {
+  if (!leadIds || leadIds.length === 0) return {}
+  
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('lead_intelligence_history')
+    .select('lead_id, report_json, created_at')
+    .in('lead_id', leadIds)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('Erro ao buscar action plans de urgência:', error)
+    return {}
+  }
+
+  // Pegar apenas o mais recente de cada lead
+  const map: Record<string, any> = {}
+  data.forEach(record => {
+    if (!map[record.lead_id]) {
+      map[record.lead_id] = record.report_json
+    }
+  })
+
+  return map
 }

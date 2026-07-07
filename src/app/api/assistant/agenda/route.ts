@@ -1,10 +1,11 @@
+export const maxDuration = 60;
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { AuraAnalyzer } from '@/lib/aura-analyzer'
 import { createEvent } from '@/app/actions/eventos'
 import { updateLeadStage, createLead, updateLead } from '@/app/actions/pipeline'
 import { recordCommercialActivity } from '@/app/actions/commercial-activities'
-import { generateText, tool, stepCountIs } from 'ai'
+import { generateText, tool } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 
@@ -430,7 +431,6 @@ ${formattedContext}`
       model: openai('gpt-4o'),
       system: systemPrompt,
       messages: [...history, { role: 'user', content: message }],
-      stopWhen: stepCountIs(8),
       tools: {
         create_lead: tool({
           description: 'Cria um novo lead no sistema. Se fornecido apenas o CNPJ, tentará buscar os dados da empresa automaticamente.',
@@ -438,7 +438,7 @@ ${formattedContext}`
             name: z.string().describe('Nome do contato principal'),
             company: z.string().optional().describe('Nome da empresa'),
             cnpj: z.string().optional().describe('CNPJ da empresa'),
-            estimated_value: z.number().optional().describe('Faturamento estimado'),
+            expected_value: z.number().optional().describe('Faturamento estimado'),
             product_id: z.string().optional().describe('ID do produto de interesse'),
             email: z.string().optional().describe('E-mail de contato'),
             phone: z.string().optional().describe('Telefone de contato'),
@@ -462,7 +462,7 @@ ${formattedContext}`
               product_id: args.product_id ?? '',
               consultant_id: effectiveUser.id,
               stage: args.stage ?? 'Contato Inicial',
-              estimated_value: args.estimated_value ?? 0
+              expected_value: args.expected_value ?? 0
             })
             return { success: r.success, error: r.error, data: r.lead }
           }
@@ -538,7 +538,115 @@ ${formattedContext}`
       }
     })
 
-    return NextResponse.json({ reply: result.text || '⚠️ Sem resposta da IA.' })
+    let finalReply = result.text;
+
+    // Loop fallback se a IA chamou ferramentas mas não retornou texto
+    if (!finalReply && result.toolResults && result.toolResults.length > 0) {
+      const newMessages = [
+        ...history,
+        { role: 'user', content: message },
+        { role: 'assistant', content: '', toolCalls: result.toolCalls },
+        { role: 'tool', content: result.toolResults }
+      ] as any[];
+
+      const loopResult = await generateText({
+        model: openai('gpt-4o'),
+        system: systemPrompt,
+        messages: newMessages,
+        tools: {
+          create_lead: tool({
+            description: 'Cria um novo lead no sistema. Se fornecido apenas o CNPJ, tentará buscar os dados da empresa automaticamente.',
+            inputSchema: z.object({
+              name: z.string().describe('Nome do contato principal'),
+              company: z.string().optional().describe('Nome da empresa'),
+              cnpj: z.string().optional().describe('CNPJ da empresa'),
+              expected_value: z.number().optional().describe('Faturamento estimado'),
+              product_id: z.string().optional().describe('ID do produto de interesse'),
+              email: z.string().optional().describe('E-mail de contato'),
+              phone: z.string().optional().describe('Telefone de contato'),
+              stage: z.enum(['Contato Inicial', 'Qualificação', 'Reunião Agendada', 'Proposta Enviada', 'Negociação', 'Fechamento']).optional()
+            }),
+            execute: async (args) => {
+              const r = await createLead({
+                ...args,
+                company: args.company ?? '',
+                product_id: args.product_id ?? '',
+                consultant_id: effectiveUser.id,
+                stage: args.stage ?? 'Contato Inicial',
+                expected_value: args.expected_value ?? 0
+              })
+              return { success: r.success, error: r.error, data: r.lead }
+            }
+          }),
+          update_lead: tool({
+            description: 'Atualiza dados de um lead existente.',
+            inputSchema: z.object({
+              leadId: z.string().describe('ID do lead a ser atualizado'),
+              name: z.string().optional(),
+              company: z.string().optional(),
+              estimated_value: z.number().optional(),
+              cnpj: z.string().optional(),
+              regime_tributario: z.string().optional()
+            }),
+            execute: async ({ leadId, ...updateData }) => {
+              const r = await updateLead(leadId, updateData)
+              return { success: r.success, error: r.error }
+            }
+          }),
+          get_pipeline_summary: tool({
+            description: 'Retorna um resumo detalhado do pipeline atual para análise estratégica.',
+            inputSchema: z.object({}),
+            execute: async () => {
+              const ctx = await AuraAnalyzer.getSystemContext()
+              return { success: true, data: ctx }
+            }
+          }),
+          create_event: tool({
+            description: 'Cria um novo evento ou compromisso na agenda.',
+            inputSchema: z.object({
+              name: z.string().describe('Nome do evento'),
+              date: z.string().describe('Data e hora (ISO string)'),
+              local: z.string().optional().describe('Local do evento'),
+              description: z.string().optional().describe('Descrição detalhada')
+            }),
+            execute: async (args) => {
+              const r = await createEvent(args)
+              return { success: r.success, error: r.error }
+            }
+          }),
+          update_lead_stage: tool({
+            description: 'Atualiza a etapa de um lead no pipeline.',
+            inputSchema: z.object({
+              leadId: z.string().describe('ID do lead'),
+              newStage: z.enum(['Contato Inicial', 'Qualificação', 'Reunião Agendada', 'Proposta Enviada', 'Negociação', 'Fechamento'])
+            }),
+            execute: async ({ leadId, newStage }) => {
+              const r = await updateLeadStage(leadId, newStage)
+              return { success: r.success, error: (r as { error?: string }).error }
+            }
+          }),
+          add_commercial_note: tool({
+            description: 'Registra uma nota ou atividade comercial em um lead.',
+            inputSchema: z.object({
+              leadId: z.string().describe('ID do lead'),
+              content: z.string().describe('Conteúdo da nota'),
+              type: z.enum(['nota', 'ligacao', 'reuniao', 'email']).optional().describe('Tipo da atividade')
+            }),
+            execute: async ({ leadId, content, type }) => {
+              const r = await recordCommercialActivity({
+                leadId,
+                activityType: type ?? 'nota',
+                subject: content,
+              })
+              return { success: r.success, error: r.error }
+            }
+          })
+        }
+      });
+      finalReply = loopResult.text;
+    }
+
+    return NextResponse.json({ reply: finalReply || '⚠️ Sem resposta da IA.' })
   } catch (error: unknown) {
     console.error('Erro crítico na Aura API:', error)
     const msg = error instanceof Error ? error.message : 'Erro desconhecido'

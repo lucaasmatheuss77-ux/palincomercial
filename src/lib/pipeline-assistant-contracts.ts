@@ -22,7 +22,6 @@ export type PipelineAssistantStage =
   | 'Qualificacao'
   | 'Apresentacao'
   | 'Proposta'
-  | 'Negociacao'
   | 'Fechado'
   | 'Perdido'
 

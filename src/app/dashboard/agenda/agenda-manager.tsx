@@ -15,19 +15,20 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import ActionDialog from '@/components/action-dialog'
+import { ClientSearchField, type ClienteOption } from '@/components/client-search-field'
 import {
   createMeeting,
   createMeetingTask,
   toggleMeetingTask,
   updateMeetingStatus,
 } from '@/app/actions/agenda'
-import type { AgendaLeadOption, AgendaLogisticsItem, AgendaMeeting, AgendaProfile, AgendaTask } from './agenda-types'
+import type { AgendaLogisticsItem, AgendaMeeting, AgendaProfile, AgendaTask } from './agenda-types'
 import MeetingDrawer from './agenda-drawer'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type AgendaManagerProps = {
-  leads: AgendaLeadOption[]
+  clientes: ClienteOption[]
   logisticsItems: AgendaLogisticsItem[]
   meetings: AgendaMeeting[]
   profiles: AgendaProfile[]
@@ -135,7 +136,7 @@ function buildMonthCalendar(month: Date, meetings: AgendaMeeting[]) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AgendaManager({
-  leads,
+  clientes,
   logisticsItems: initialLogistics,
   meetings: initialMeetings,
   profiles,
@@ -165,7 +166,7 @@ export default function AgendaManager({
 
   // Forms
   const [meetingForm, setMeetingForm] = useState({
-    title: '', lead_id: '', scheduled_for: '', ends_at: '',
+    title: '', lead_id: '', client_id: '', client_name: '', scheduled_for: '', ends_at: '',
     location: '', meeting_type: 'Presencial', objective: '',
     notes: '', next_step: '', next_contact_at: '', owner_profile_id: '',
     requires_logistics: false,
@@ -218,7 +219,7 @@ export default function AgendaManager({
 
   function resetMeetingForm() {
     setMeetingForm({
-      title: '', lead_id: '', scheduled_for: '', ends_at: '',
+      title: '', lead_id: '', client_id: '', client_name: '', scheduled_for: '', ends_at: '',
       location: '', meeting_type: 'Presencial', objective: '',
       notes: '', next_step: '', next_contact_at: '', owner_profile_id: '',
       requires_logistics: false,
@@ -233,12 +234,10 @@ export default function AgendaManager({
 
     if (setupMissing) {
       const ownerProfile = profiles.find(p => p.id === meetingForm.owner_profile_id)
-      const selectedLead = leads.find(l => l.id === meetingForm.lead_id)
-      const [leadName, companyName] = selectedLead?.label.split(' - ') || []
       const newMeeting: AgendaMeeting = {
         id: `local-${Date.now()}`, title: meetingForm.title.trim(),
-        lead_id: meetingForm.lead_id || null, lead_name: leadName || null,
-        company_name: companyName || null, client_id: null, client_name: null,
+        lead_id: null, lead_name: null,
+        company_name: null, client_id: meetingForm.client_id || null, client_name: meetingForm.client_name || null,
         scheduled_for: meetingForm.scheduled_for, ends_at: meetingForm.ends_at || null,
         location: meetingForm.location || null, meeting_type: meetingForm.meeting_type || 'Presencial',
         status: 'agendada', objective: meetingForm.objective || null, notes: meetingForm.notes || null,
@@ -255,19 +254,21 @@ export default function AgendaManager({
     }
 
     startTransition(async () => {
-      const selectedLead = leads.find(l => l.id === meetingForm.lead_id)
       const result = await createMeeting({
-        ...meetingForm,
+        title: meetingForm.title,
+        scheduled_for: meetingForm.scheduled_for,
         ends_at: meetingForm.ends_at || null,
         location: meetingForm.location || null,
+        meeting_type: meetingForm.meeting_type || null,
         notes: meetingForm.notes || null,
         objective: meetingForm.objective || null,
-        lead_id: meetingForm.lead_id || null,
-        lead_name: selectedLead?.label.split(' - ')[0] || null,
-        company_name: selectedLead?.label.split(' - ')[1] || null,
+        lead_id: null,
+        client_id: meetingForm.client_id || null,
+        company_name: meetingForm.client_name || null,
         next_step: meetingForm.next_step || null,
         next_contact_at: meetingForm.next_contact_at || null,
         owner_profile_id: meetingForm.owner_profile_id || null,
+        requires_logistics: meetingForm.requires_logistics,
       })
       if (!result.success) { toast.error('Erro ao criar reunião', { description: result.error }); return }
       toast.success('Reunião salva na agenda.')
@@ -330,7 +331,7 @@ export default function AgendaManager({
 
   return (
     <>
-      <div className="animate-fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="animate-fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', maxWidth: '1480px', margin: '0 auto' }}>
 
       {/* ── HEADER ─────────────────────────────────────────────────────── */}
       <div style={{
@@ -728,6 +729,8 @@ export default function AgendaManager({
         </div>
       </div>
 
+      </div>
+
       {/* ── MEETING DRAWER ───────────────────────────────────────────────── */}
       <MeetingDrawer
         meeting={selectedMeeting}
@@ -735,7 +738,6 @@ export default function AgendaManager({
         onStatusChange={handleMeetingStatus}
         isPending={isPending}
       />
-      </div>
 
       {/* ── MODALS ───────────────────────────────────────────────────────── */}
       <ActionDialog
@@ -752,10 +754,13 @@ export default function AgendaManager({
       >
         <div style={{ display: 'grid', gap: '12px' }}>
           <input className="input-field" placeholder="Título da reunião *" value={meetingForm.title} onChange={e => setMeetingForm(c => ({ ...c, title: e.target.value }))} />
-          <select className="input-field" value={meetingForm.lead_id} onChange={e => setMeetingForm(c => ({ ...c, lead_id: e.target.value }))}>
-            <option value="">Vincular a um lead</option>
-            {leads.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
-          </select>
+          <ClientSearchField
+            clientes={clientes}
+            selected={meetingForm.client_id ? { id: meetingForm.client_id, nome: meetingForm.client_name } : null}
+            onSelect={(cliente) => setMeetingForm(c => ({ ...c, client_id: cliente.id, client_name: cliente.nome }))}
+            onClear={() => setMeetingForm(c => ({ ...c, client_id: '', client_name: '' }))}
+            placeholder="Vincular a um cliente cadastrado"
+          />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <input className="input-field" type="datetime-local" value={meetingForm.scheduled_for} onChange={e => setMeetingForm(c => ({ ...c, scheduled_for: e.target.value }))} />
             <input className="input-field" type="datetime-local" value={meetingForm.ends_at} onChange={e => setMeetingForm(c => ({ ...c, ends_at: e.target.value }))} />

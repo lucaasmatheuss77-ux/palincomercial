@@ -166,7 +166,7 @@ Gere: abertura (3 linhas), diagnóstico (5 perguntas), pitch das 2 principais op
         company: nome,
         product_id: matchedProduct?.id || products[0]?.id || '',
         consultant_id: '',
-        estimated_value: 0,
+        expected_value: 0,
         stage: 'Contato Inicial',
         segmento_especifico: [
           seg, faturamento, estadoFiscal, obs,

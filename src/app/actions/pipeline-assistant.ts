@@ -29,7 +29,7 @@ type LeadRow = {
   name: string
   company: string | null
   stage: PipelineAssistantStage | string | null
-  estimated_value: number | string | null
+  expected_value: number | string | null
   created_at: string | null
   phone: string | null
   whatsapp: string | null
@@ -48,7 +48,6 @@ function normalizeStageFilter(stageFilter?: PipelineAssistantRequest['stageFilte
     stage === 'Qualificacao' ||
     stage === 'Apresentacao' ||
     stage === 'Proposta' ||
-    stage === 'Negociacao' ||
     stage === 'Fechado' ||
     stage === 'Perdido'
   )
@@ -59,7 +58,7 @@ function getLeadStage(stage: LeadRow['stage']): PipelineAssistantStage {
   if (stage === 'Qualificacao' || stage === 'Qualificado') return 'Qualificacao'
   if (stage === 'Apresentacao' || stage === 'Diagnostico' || stage === 'Diagnóstico') return 'Apresentacao'
   if (stage === 'Proposta') return 'Proposta'
-  if (stage === 'Negociacao' || stage === 'Negociação') return 'Negociacao'
+  if (stage === 'Proposta' || stage === 'Negociação') return 'Proposta'
   if (stage === 'Fechado') return 'Fechado'
   return 'Perdido'
 }
@@ -279,7 +278,7 @@ async function loadAssistantData(input: Required<Pick<PipelineAssistantRequest, 
   let leadsQuery = supabase
     .from('leads')
     .select(`
-      id, name, company, stage, estimated_value, created_at,
+      id, name, company, stage, expected_value, created_at,
       phone, whatsapp, email,
       product_id, consultant_id,
       product:products(id, name),
@@ -344,7 +343,7 @@ async function loadAssistantData(input: Required<Pick<PipelineAssistantRequest, 
       product_id: lead.product_id || '',
       consultant: formatLeadName(consultant?.full_name || null),
       consultant_id: lead.consultant_id || '',
-      value: Number(lead.estimated_value) || 0,
+      value: Number(lead.expected_value) || 0,
       days: createdAt && !Number.isNaN(createdAt.getTime())
         ? Math.max(0, Math.floor((referenceTime - createdAt.getTime()) / (1000 * 60 * 60 * 24)))
         : 0,
@@ -506,9 +505,7 @@ export async function generateFollowUpSuggestion(leadId: string) {
     ],
     'Proposta': [
       `${lead.name}, a proposta está na mesa! Conseguiu revisar os valores? Estou pronto para negociar os termos finais com você.`,
-      `Oi ${lead.name}, nossa proposta expira em breve. Vamos garantir essa condição especial para você?`
-    ],
-    'Negociacao': [
+      `Oi ${lead.name}, nossa proposta expira em breve. Vamos garantir essa condição especial para você?`,
       `${lead.name}, o que falta para fecharmos? Se o problema for o prazo ou parcelamento, vamos resolver isso agora.`,
       `Oi ${lead.name}, autorizei uma condição única para fecharmos hoje. Podemos assinar?`
     ]
@@ -520,3 +517,4 @@ export async function generateFollowUpSuggestion(leadId: string) {
 
   return { success: true, suggestions: selected }
 }
+

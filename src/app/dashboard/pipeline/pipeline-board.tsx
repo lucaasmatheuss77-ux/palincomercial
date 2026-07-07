@@ -8,8 +8,9 @@ import { createMeeting } from '@/app/actions/agenda'
 import { updateLeadStage, createLead, updateLead, deleteLead } from '@/app/actions/pipeline'
 import { createCallLog, type CallOutcome } from '@/app/actions/ligacoes'
 import { analyzePipelineAssistant } from '@/app/actions/pipeline-assistant'
-import { generateLeadIntelligence, getIntelligenceHistory } from '@/app/actions/intelligence'
+import { generateLeadIntelligence, getIntelligenceHistory, getUrgentLeadsActionPlans } from '@/app/actions/intelligence'
 import ActionDialog from '@/components/action-dialog'
+import { ClientSearchField, type ClienteOption } from '@/components/client-search-field'
 import { generateFollowUpSuggestion } from '@/app/actions/pipeline-assistant'
 import { saveLeadDocument, getLeadDocuments } from '@/app/actions/pipeline'
 import {
@@ -27,8 +28,8 @@ import type {
   PipelineLeadSnapshot,
 } from '@/lib/pipeline-assistant-contracts'
 
-export type Stage = 'Contato Inicial' | 'Qualificacao' | 'Apresentacao' | 'Proposta' | 'Negociacao' | 'Fechado' | 'Perdido'
-export const stages: Stage[] = ['Contato Inicial', 'Qualificacao', 'Apresentacao', 'Proposta', 'Negociacao', 'Fechado']
+export type Stage = 'Contato Inicial' | 'Qualificacao' | 'Apresentacao' | 'Proposta' | 'Fechado' | 'Perdido'
+export const stages: Stage[] = ['Contato Inicial', 'Qualificacao', 'Apresentacao', 'Proposta', 'Fechado']
 type LeadDocument = Awaited<ReturnType<typeof getLeadDocuments>>[number]
 type StalledStyle = {
   color: string
@@ -54,9 +55,8 @@ const NORMALIZED_STAGE_MAP: Record<string, string> = {
   'Reunião': 'Apresentacao',
   'Proposta': 'Proposta',
   'Proposta Enviada': 'Proposta',
-  'Negociação': 'Negociacao',
-  'Negociacao': 'Negociacao',
-  'Negociaçãão': 'Negociacao',
+  'Negociação': 'Proposta',
+  'Negociaçãão': 'Proposta',
   'Fechado': 'Fechado',
   'Ganhos': 'Fechado',
   'Vendido': 'Fechado',
@@ -66,20 +66,19 @@ const NORMALIZED_STAGE_MAP: Record<string, string> = {
 }
 
 export const stageColors: Record<Stage, string> = {
-  'Contato Inicial': '#64748b',
-  Qualificacao: '#3b82f6',
-  Apresentacao: '#14b8a6',
-  Proposta: '#f59e0b',
-  Negociacao: '#f97316',
-  Fechado: '#10b981',
-  Perdido: '#ef4444',
+  'Contato Inicial': '#9ca3af', // cinza
+  Qualificacao: '#3b82f6', // azul
+  Apresentacao: '#eab308', // amarelo
+  Proposta: '#ef4444', // vermelho
+  Fechado: '#3b82f6', // azul (conforme solicitado para fechamento)
+  Perdido: '#475569',
 }
 
 const stageDisplay: Record<Stage, { label: string; detail: string; next: string }> = {
   'Contato Inicial': {
     label: 'Contato Inicial',
-    detail: 'Primeiro contato e triagem do lead.',
-    next: 'Registrar origem, dor e combinar a primeira reunião.',
+    detail: 'Lead frio identificado por pesquisa. Primeiro contato ainda não qualificado.',
+    next: 'Ligar, qualificar e avançar para Qualificação.',
   },
   Qualificacao: {
     label: 'Qualificação',
@@ -96,11 +95,6 @@ const stageDisplay: Record<Stage, { label: string; detail: string; next: string 
     detail: 'Enviar proposta formal e agendar follow-up.',
     next: 'Retomar contato e remover objeções.',
   },
-  Negociacao: {
-    label: 'Negociação',
-    detail: 'Remover objeções e conduzir ao fechamento.',
-    next: 'Conduzir assinatura e transição.',
-  },
   Fechado: {
     label: 'Fechamento',
     detail: 'Contrato encerrado e conta pronta para Clientes.',
@@ -114,11 +108,10 @@ const stageDisplay: Record<Stage, { label: string; detail: string; next: string 
 }
 
 const CADENCE_DAYS: Record<Stage, number> = {
-  'Contato Inicial': 3,
+  'Contato Inicial': 1,
   Qualificacao: 5,
   Apresentacao: 5,
-  Proposta: 4,
-  Negociacao: 2,
+  Proposta: 2,
   Fechado: 999,
   Perdido: 999,
 }
@@ -137,6 +130,8 @@ export type LeadType = PipelineLeadSnapshot & {
   contract_number?: string | null
   contract_valid_until?: string | null
   contract_pdf_name?: string | null
+  ai_warning_text?: string | null
+  ai_recommended_action?: string | null
 }
 
 type LeadMeetingTimeline = {
@@ -191,6 +186,7 @@ type PipelineBoardProps = {
   initialLeads: LeadType[]
   products: Option[]
   consultants: Option[]
+  clientes: ClienteOption[]
   leadTimelines: Array<{ leadId: string; meetings: LeadMeetingTimeline[]; activities: LeadActivityTimeline[] }>
   initialSelectedLeadId?: string | null
   latestAiFreshnessMinutes: number | null
@@ -215,6 +211,7 @@ const emptyDraft = {
   ai_source: '',
   ai_summary: '',
   stage: '' as Stage | '',
+  next_contact_at: '',
 }
 
 
@@ -245,10 +242,10 @@ function maskCnpj(value: string) {
 
 
 function getLeadTemperature(lead: LeadType) {
-  if (lead.stage === 'Negociacao' || lead.stage === 'Fechado') {
+  if (lead.stage === 'Proposta' || lead.stage === 'Fechado') {
     return { label: 'Quente', color: '#f97316', background: 'rgba(249,115,22,0.12)' }
   }
-  if (lead.ai_score >= 80 || lead.stage === 'Proposta') {
+  if (lead.ai_score >= 80) {
     return { label: 'Promissor', color: '#93c5fd', background: 'rgba(96,165,250,0.12)' }
   }
   if (lead.days >= 20) {
@@ -262,12 +259,21 @@ function getLeadNextAction(lead: LeadType) {
   if (lead.stage === 'Qualificacao') return stageDisplay.Qualificacao.next
   if (lead.stage === 'Apresentacao') return stageDisplay.Apresentacao.next
   if (lead.stage === 'Proposta') return stageDisplay.Proposta.next
-  if (lead.stage === 'Negociacao') return stageDisplay.Negociacao.next
   if (lead.stage === 'Fechado') return stageDisplay.Fechado.next
   return stageDisplay.Perdido.next
 }
 
+function getPalinIAPrioritizedPlan(lead: LeadType) {
+  if (lead.stage === 'Contato Inicial') return '[1º Pesquisar Empresa, 2º Ligar e Qualificar]'
+  if (lead.stage === 'Qualificacao') return '[1º Ligar p/ Qualificar, 2º Agendar Reunião]'
+  if (lead.stage === 'Apresentacao') return '[1º Preparar Material, 2º Apresentação]'
+  if (lead.stage === 'Proposta') return '[1º Ligar urgente, 2º Resolver Objeções e Fechar]'
+  return '[1º Retomar Contato, 2º Entender Momento]'
+}
+
 function getLeadAttention(lead: LeadType) {
+  if (lead.stage === 'Contato Inicial' && lead.days >= 1) return 'URGENTE: Contato Inicial deve ser feito em até 1 dia.'
+  if (lead.stage === 'Proposta' && lead.days >= 2) return 'URGENTE: Proposta não pode ficar mais de 2 dias sem envio.'
   if (lead.days >= 30) return 'Lead parado ha mais de 30 dias.'
   if (lead.days >= 15) return 'Vale retomar o contato ainda hoje.'
   if (lead.ai_status === 'revisar') return 'IA pediu revisao antes de avancar.'
@@ -279,8 +285,7 @@ const STAGE_PROBABILITY: Record<Stage, number> = {
   'Contato Inicial': 10,
   Qualificacao: 20,
   Apresentacao: 35,
-  Proposta: 50,
-  Negociacao: 70,
+  Proposta: 60,
   Fechado: 95,
   Perdido: 0,
 }
@@ -296,6 +301,28 @@ function getStalledDays(timeline: { meetings: LeadMeetingTimeline[]; activities:
   if (candidates.length === 0) return null
   const latest = Math.max(...candidates)
   return Math.max(0, Math.floor((Date.now() - latest) / (1000 * 60 * 60 * 24)))
+}
+
+function getDaysSinceContact(lead: LeadType, timeline?: { meetings: LeadMeetingTimeline[]; activities: LeadActivityTimeline[] }): number {
+  const stalledDays = getStalledDays(timeline)
+  if (stalledDays !== null) return stalledDays;
+  
+  if (!(lead as any).last_contact_at && stalledDays === null) {
+    return 999;
+  }
+  
+  const candidates: number[] = [];
+  if ((lead as any).last_contact_at) candidates.push(new Date((lead as any).last_contact_at).getTime());
+  if (lead.ai_updated_at) candidates.push(new Date(lead.ai_updated_at).getTime());
+  if ((lead as any).created_at) candidates.push(new Date((lead as any).created_at).getTime());
+  
+  if (candidates.length > 0) {
+    const latest = Math.max(...candidates);
+    if (!Number.isNaN(latest)) {
+      return Math.max(0, Math.floor((Date.now() - latest) / (1000 * 60 * 60 * 24)));
+    }
+  }
+  return typeof lead.days === 'number' ? lead.days : 0;
 }
 
 function getStalledStyle(days: number | null, stage: Stage): StalledStyle {
@@ -592,6 +619,7 @@ export default function PipelineBoard({
   initialLeads,
   products,
   consultants,
+  clientes,
   leadTimelines,
   initialSelectedLeadId,
 }: PipelineBoardProps) {
@@ -600,6 +628,10 @@ export default function PipelineBoard({
   const [showCreateLead, setShowCreateLead] = useState(false)
   const [showEditLead, setShowEditLead] = useState(false)
   const [editingLead, setEditingLead] = useState<LeadType | null>(null)
+  const [showContractModal, setShowContractModal] = useState(false)
+  const [pendingClosedLead, setPendingClosedLead] = useState<LeadType | null>(null)
+  const [contractFile, setContractFile] = useState<File | null>(null)
+  const [isUploadingContract, setIsUploadingContract] = useState(false)
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(initialSelectedLeadId ?? null)
   const [meetingOpen, setMeetingOpen] = useState(false)
   const [draftLead, setDraftLead] = useState({ ...emptyDraft })
@@ -640,6 +672,7 @@ export default function PipelineBoard({
   const [leadDocs, setLeadDocs] = useState<LeadDocument[]>([])
   const [docsLoading, setDocsLoading] = useState(false)
   const [isVoiceRecording, setIsVoiceRecording] = useState(false)
+  const [showAdvancedFields, setShowAdvancedFields] = useState(false)
   type IntelligenceRecord = {
     id: string
     created_at: string
@@ -659,6 +692,8 @@ export default function PipelineBoard({
   }
   const [intelligenceRecords, setIntelligenceRecords] = useState<IntelligenceRecord[]>([])
   const [intelligenceLoading, setIntelligenceLoading] = useState(false)
+  const [urgentActionPlans, setUrgentActionPlans] = useState<Record<string, any>>({})
+  const [archivedContracts, setArchivedContracts] = useState<Set<string>>(new Set())
   const initialSelectedLeadAppliedRef = useRef<string | null>(null)
 
   const getLeadsByStage = (stage: Stage) => leads.filter((lead) => {
@@ -770,6 +805,14 @@ export default function PipelineBoard({
 
     if (!currentLead || currentLead.stage === newStage) return
 
+    const isBackwards = stages.indexOf(newStage) < stages.indexOf(currentLead.stage as Stage)
+
+    if (newStage === 'Fechado') {
+      setPendingClosedLead(currentLead)
+      setShowContractModal(true)
+      return
+    }
+
     setLeads((previous) => previous.map((lead) => (lead.id === leadId ? { ...lead, stage: newStage } : lead)))
 
     const result = await updateLeadStage(leadId, newStage)
@@ -780,9 +823,8 @@ export default function PipelineBoard({
     }
 
     // Feedback visual de vitória
-    if (newStage === 'Fechado') {
-      const isRural = /rural|cat 153|agronegocio/i.test(currentLead.name || '')
-      triggerSaleConfetti(isRural)
+    if (isBackwards) {
+      toast.warning('Auditoria Solicitada', { description: 'O gestor foi notificado para realizar uma auditoria sobre o retorno deste lead.' })
     } else {
       triggerSingleBoom()
     }
@@ -955,6 +997,16 @@ export default function PipelineBoard({
       if (result.success) {
         toast.success('Inteligência gerada com sucesso!')
         void handleFetchIntelligence(leadId)
+        if (result.data) {
+          setLeads(current => current.map(l => 
+            l.id === leadId ? { 
+              ...l, 
+              ai_score: result.data.score || l.ai_score, 
+              ai_status: 'avaliado', 
+              ai_summary: result.data.dor_principal || result.data.prioridade || 'Análise concluída.'
+            } : l
+          ))
+        }
       } else {
         toast.error('Erro ao gerar inteligência', { description: result.error })
       }
@@ -1094,11 +1146,13 @@ export default function PipelineBoard({
   function openCreateLead(stage: Stage) {
     setDraftStage(stage)
     setDraftLead({ ...emptyDraft })
+    setShowAdvancedFields(false)
     setShowCreateLead(true)
   }
 
   function openEditLead(lead: LeadType) {
     setEditingLead(lead)
+    setShowAdvancedFields(false)
     setDraftLead({
       name: lead.name,
       company: lead.company,
@@ -1110,6 +1164,7 @@ export default function PipelineBoard({
       email: lead.email,
       cnpj: (lead as LeadType & { cnpj?: string }).cnpj ?? '',
       regime_tributario: (lead as LeadType & { regime_tributario?: string }).regime_tributario ?? '',
+      next_contact_at: '',
       faturamento_estimado: (lead as LeadType & { faturamento_estimado?: number }).faturamento_estimado != null
         ? String((lead as LeadType & { faturamento_estimado?: number }).faturamento_estimado)
         : '',
@@ -1134,7 +1189,7 @@ export default function PipelineBoard({
       company: draftLead.company.trim(),
       product_id: draftLead.product_id,
       consultant_id: draftLead.consultant_id,
-      estimated_value: Number(draftLead.value) || 0,
+      expected_value: Number(draftLead.value) || 0,
       stage: draftLead.stage || draftStage,
       phone: draftLead.phone.trim(),
       whatsapp: draftLead.whatsapp.trim(),
@@ -1192,7 +1247,7 @@ export default function PipelineBoard({
       company: draftLead.company.trim(),
       product_id: draftLead.product_id || undefined,
       consultant_id: draftLead.consultant_id || undefined,
-      estimated_value: Number(draftLead.value) || 0,
+      expected_value: Number(draftLead.value) || 0,
       phone: draftLead.phone.trim(),
       whatsapp: draftLead.whatsapp.trim(),
       email: draftLead.email.trim(),
@@ -1263,111 +1318,291 @@ export default function PipelineBoard({
     toast.success(`${lead.name} removido do fluxo.`)
   }
 
-  const kpis = [
-    { 
-      label: 'Ações Hoje', 
-      value: String(leads.filter(l => l.days === 0).length),
-      detail: 'Leads com movimentação nas últimas 24h',
-      icon: Sparkles,
-      color: '#10b981' 
+  const priorityLeads = useMemo(() => {
+    const leadsWithData = leads.map(lead => {
+      const daysSinceContact = getDaysSinceContact(lead, leadTimelineMap.get(lead.id))
+      const overdueDays = daysSinceContact - (CADENCE_DAYS[lead.stage] || 999)
+      const isUrgent = ['Proposta'].includes(lead.stage || '')
+      return { lead, overdueDays, isUrgent }
+    }).filter(item => item.overdueDays > 0 || item.isUrgent)
+
+    const sorted = leadsWithData.sort((a, b) => {
+      if (a.isUrgent && !b.isUrgent) return -1
+      if (!a.isUrgent && b.isUrgent) return 1
+      return b.overdueDays - a.overdueDays
+    })
+
+    const grouped = {} as Record<string, typeof sorted>
+    for (const item of sorted) {
+      const stage = item.lead.stage as string
+      if (!grouped[stage]) grouped[stage] = []
+      if (grouped[stage].length < 15) grouped[stage].push(item)
     }
-  ]
+
+    return Object.values(grouped).flat().map(item => item.lead)
+  }, [leads, leadTimelineMap])
+
+  useEffect(() => {
+    if (priorityLeads.length > 0) {
+      const ids = priorityLeads.map(l => l.id)
+      getUrgentLeadsActionPlans(ids).then(plans => {
+        setUrgentActionPlans(plans)
+      }).catch(err => {
+        console.error('Erro ao buscar action plans de urgência:', err)
+      })
+    } else {
+      setUrgentActionPlans({})
+    }
+  }, [priorityLeads])
+
+  const isContatoInicial = !draftLead.stage || draftLead.stage === 'Contato Inicial'
+
+  // CNPJ: se o lead já tem client_id, usa o documento do cliente (auto-preenchido)
+  const clientCnpj = editingLead?.cnpj ?? ''
 
   const leadFormFields = (
     <div style={{ display: 'grid', gap: '12px' }}>
-      <input className="input-field" placeholder="Nome do lead *" value={draftLead.name} onChange={(e) => setDraftLead((c) => ({ ...c, name: e.target.value }))} />
-      <input className="input-field" placeholder="Empresa" value={draftLead.company} onChange={(e) => setDraftLead((c) => ({ ...c, company: e.target.value }))} />
-      <select
+
+      {!editingLead && (
+        <label style={{ display: 'grid', gap: '6px' }}>
+          <span style={{ color: '#94a3b8', fontSize: '0.78rem', fontWeight: 700 }}>Ja e cliente cadastrado?</span>
+          <ClientSearchField
+            clientes={clientes}
+            selected={null}
+            onSelect={(cliente) => setDraftLead((c) => ({
+              ...c,
+              name: cliente.nome,
+              company: cliente.company_name || c.company,
+              email: cliente.email || c.email,
+              phone: cliente.phone || c.phone,
+              cnpj: cliente.documento || c.cnpj,
+            }))}
+            onClear={() => {}}
+            placeholder="Buscar cliente cadastrado para preencher automaticamente"
+          />
+        </label>
+      )}
+
+      {/* BLOCO 1: Identificação — sempre visível */}
+      <input
         className="input-field"
-        value={draftLead.product_id}
-        onChange={(e) => setDraftLead((c) => ({ ...c, product_id: e.target.value }))}
-        style={{ background: 'var(--brand-surface)', color: draftLead.product_id ? '#e2e8f0' : '#64748b' }}
-      >
-        <option value="">Selecionar produto</option>
-        {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </select>
-      <select
+        placeholder="Nome do contato *"
+        value={draftLead.name}
+        onChange={(e) => setDraftLead((c) => ({ ...c, name: e.target.value }))}
+      />
+      <input
         className="input-field"
-        value={draftLead.consultant_id}
-        onChange={(e) => setDraftLead((c) => ({ ...c, consultant_id: e.target.value }))}
-        style={{ background: 'var(--brand-surface)', color: draftLead.consultant_id ? '#e2e8f0' : '#64748b' }}
-      >
-        <option value="">Selecionar consultor</option>
-        {consultants.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </select>
-      <input className="input-field" placeholder="Valor estimado do contrato (R$)" type="number" value={draftLead.value} onChange={(e) => setDraftLead((c) => ({ ...c, value: e.target.value }))} />
-      
+        placeholder="Empresa"
+        value={draftLead.company}
+        onChange={(e) => setDraftLead((c) => ({ ...c, company: e.target.value }))}
+      />
+
+      {/* BLOCO 2: Contato — sempre visível */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+        <input
+          className="input-field"
+          placeholder="Telefone / Ligação"
+          value={draftLead.phone}
+          onChange={(e) => setDraftLead((c) => ({ ...c, phone: e.target.value }))}
+        />
+        <input
+          className="input-field"
+          placeholder="WhatsApp"
+          value={draftLead.whatsapp}
+          onChange={(e) => setDraftLead((c) => ({ ...c, whatsapp: e.target.value }))}
+        />
+      </div>
+
+      {/* BLOCO 3: Consultor + Produto — sempre visível */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+        <select
+          className="input-field"
+          value={draftLead.consultant_id}
+          onChange={(e) => setDraftLead((c) => ({ ...c, consultant_id: e.target.value }))}
+          style={{ background: 'var(--brand-surface)', color: draftLead.consultant_id ? '#e2e8f0' : '#64748b' }}
+        >
+          <option value="">Consultor responsável</option>
+          {consultants.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select
+          className="input-field"
+          value={draftLead.product_id}
+          onChange={(e) => setDraftLead((c) => ({ ...c, product_id: e.target.value }))}
+          style={{ background: 'var(--brand-surface)', color: draftLead.product_id ? '#e2e8f0' : '#64748b' }}
+        >
+          <option value="">Produto</option>
+          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+
+      {/* BLOCO 4: Próximo contato — sempre visível, foco no acompanhamento */}
+      <div style={{ display: 'grid', gap: '6px' }}>
+        <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          📅 Próximo contato
+        </div>
+        <input
+          className="input-field"
+          type="datetime-local"
+          value={draftLead.next_contact_at}
+          onChange={(e) => setDraftLead((c) => ({ ...c, next_contact_at: e.target.value }))}
+          style={{ colorScheme: 'dark' }}
+        />
+      </div>
+
+      {/* BLOCO 5: Observações — sempre visível, compacto */}
+      <textarea
+        className="input-field"
+        placeholder={isContatoInicial ? 'Observações do contato (origem, interesse, dor mencionada...)' : 'Informações / Observações livres'}
+        value={draftLead.ai_summary}
+        onChange={(e) => setDraftLead((c) => ({ ...c, ai_summary: e.target.value }))}
+        style={{ minHeight: '72px', resize: 'vertical' }}
+      />
+
+      {/* BLOCO 6: Etapa — sempre visível */}
       <select
         className="input-field"
         value={draftLead.stage}
         onChange={(e) => setDraftLead((c) => ({ ...c, stage: e.target.value as Stage }))}
         style={{ background: 'var(--brand-surface)', color: draftLead.stage ? '#e2e8f0' : '#64748b' }}
       >
-        <option value="">Selecionar etapa (padrão: Contato Inicial)</option>
+        <option value="">Etapa (padrão: Contato Inicial)</option>
         {stages.map((s) => <option key={s} value={s}>{stageDisplay[s].label}</option>)}
         <option value="Perdido">Perdido</option>
       </select>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px', display: 'grid', gap: '10px' }}>
-        <div style={{ fontSize: '0.72rem', color: '#93c5fd', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          Dados Tributários (Aura Pro)
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <input 
-            className="input-field" 
-            placeholder="CNPJ" 
-            value={draftLead.cnpj} 
-            onChange={(e) => setDraftLead((c) => ({ ...c, cnpj: maskCnpj(e.target.value) }))} 
-          />
-          <select 
-            className="input-field" 
-            value={draftLead.regime_tributario} 
-            onChange={(e) => setDraftLead((c) => ({ ...c, regime_tributario: e.target.value }))}
-            style={{ background: 'var(--brand-surface)' }}
-          >
-            <option value="">Regime Tributário</option>
-            <option value="Simples Nacional">Simples Nacional</option>
-            <option value="Lucro Presumido">Lucro Presumido</option>
-            <option value="Lucro Real">Lucro Real</option>
-            <option value="Produtor Rural">Produtor Rural</option>
-          </select>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <input className="input-field" placeholder="Faturamento Anual" type="number" value={draftLead.faturamento_estimado} onChange={(e) => setDraftLead((c) => ({ ...c, faturamento_estimado: e.target.value }))} />
-          <input className="input-field" placeholder="Segmento/CNAE" value={draftLead.segmento_especifico} onChange={(e) => setDraftLead((c) => ({ ...c, segmento_especifico: e.target.value }))} />
-        </div>
+      {/* BLOCO 7: Dados avançados — colapsável, só mostra CNPJ automático se houver */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '10px' }}>
+        <button
+          type="button"
+          onClick={() => setShowAdvancedFields((v) => !v)}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '0.7rem',
+            color: '#64748b',
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            padding: 0,
+          }}
+        >
+          <span style={{ transition: 'transform 0.2s', display: 'inline-block', transform: showAdvancedFields ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+          {showAdvancedFields ? 'Ocultar dados tributários' : 'Dados tributários (CNPJ, regime...)'}
+        </button>
+
+        {showAdvancedFields && (
+          <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div style={{ position: 'relative' }}>
+                <input
+                  className="input-field"
+                  placeholder="CNPJ"
+                  value={draftLead.cnpj || clientCnpj}
+                  onChange={(e) => setDraftLead((c) => ({ ...c, cnpj: maskCnpj(e.target.value) }))}
+                />
+                {clientCnpj && !draftLead.cnpj && (
+                  <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.6rem', color: '#86efac', fontWeight: 800 }}>✓ CLIENTE</span>
+                )}
+              </div>
+              <select
+                className="input-field"
+                value={draftLead.regime_tributario}
+                onChange={(e) => setDraftLead((c) => ({ ...c, regime_tributario: e.target.value }))}
+                style={{ background: 'var(--brand-surface)' }}
+              >
+                <option value="">Regime Tributário</option>
+                <option value="Simples Nacional">Simples Nacional</option>
+                <option value="Lucro Presumido">Lucro Presumido</option>
+                <option value="Lucro Real">Lucro Real</option>
+                <option value="Produtor Rural">Produtor Rural</option>
+              </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <input
+                className="input-field"
+                placeholder="Faturamento Anual (R$)"
+                type="number"
+                value={draftLead.faturamento_estimado}
+                onChange={(e) => setDraftLead((c) => ({ ...c, faturamento_estimado: e.target.value }))}
+              />
+              <input
+                className="input-field"
+                placeholder="Segmento / CNAE"
+                value={draftLead.segmento_especifico}
+                onChange={(e) => setDraftLead((c) => ({ ...c, segmento_especifico: e.target.value }))}
+              />
+            </div>
+            <input
+              className="input-field"
+              placeholder="E-mail"
+              type="email"
+              value={draftLead.email}
+              onChange={(e) => setDraftLead((c) => ({ ...c, email: e.target.value }))}
+            />
+          </div>
+        )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-        <input className="input-field" placeholder="Telefone" value={draftLead.phone} onChange={(e) => setDraftLead((c) => ({ ...c, phone: e.target.value }))} />
-        <input className="input-field" placeholder="WhatsApp" value={draftLead.whatsapp} onChange={(e) => setDraftLead((c) => ({ ...c, whatsapp: e.target.value }))} />
-      </div>
-      <input className="input-field" placeholder="E-mail" type="email" value={draftLead.email} onChange={(e) => setDraftLead((c) => ({ ...c, email: e.target.value }))} />
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px', display: 'grid', gap: '10px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: '0.72rem', color: 'var(--brand-primary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Anotações & Documentos
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (isVoiceRecording) {
-                setIsVoiceRecording(false);
-                const mockTranscription = "\n[IA DIÁRIO DE CAMPO]: Cliente demonstrou forte interesse. Solicitou proposta revisada.";
-                setDraftLead(prev => ({ ...prev, ai_summary: (prev.ai_summary || '') + mockTranscription }));
-                triggerSingleBoom();
-              } else {
-                setIsVoiceRecording(true);
-              }
-            }}
-          >
-            <Mic size={14} style={{ color: isVoiceRecording ? '#ef4444' : 'var(--brand-primary)' }} />
-            {isVoiceRecording ? 'Gravando...' : 'IA Diário de Voz'}
-          </button>
-        </div>
+      {/* BLOCO 8: Diário de voz */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={() => {
+            if (isVoiceRecording) {
+              setIsVoiceRecording(false)
+              const mockTranscription = '\n[CAMPO]: Cliente demonstrou interesse. Registrar próxima ação.'
+              setDraftLead((prev) => ({ ...prev, ai_summary: (prev.ai_summary || '') + mockTranscription }))
+              triggerSingleBoom()
+            } else {
+              setIsVoiceRecording(true)
+            }
+          }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.72rem', color: isVoiceRecording ? '#ef4444' : '#64748b' }}
+        >
+          <Mic size={13} style={{ color: isVoiceRecording ? '#ef4444' : 'var(--brand-primary)' }} />
+          {isVoiceRecording ? 'Parar gravação' : 'Diário de voz'}
+        </button>
       </div>
     </div>
   )
+
+  async function handleConfirmContractUpload() {
+    if (!pendingClosedLead) return
+    setIsUploadingContract(true)
+    
+    // Simulate upload
+    if (contractFile) {
+      await new Promise(r => setTimeout(r, 1500))
+    }
+
+    const leadId = pendingClosedLead.id
+    const newStage = 'Fechado'
+    
+    setLeads((previous) => previous.map((lead) => (lead.id === leadId ? { ...lead, stage: newStage } : lead)))
+
+    const result = await updateLeadStage(leadId, newStage)
+    
+    setIsUploadingContract(false)
+    setShowContractModal(false)
+    setContractFile(null)
+    setPendingClosedLead(null)
+
+    if (!result.success) {
+      setLeads((previous) => previous.map((lead) => (lead.id === leadId ? { ...lead, stage: pendingClosedLead.stage } : lead)))
+      toast.error('Falha ao mover lead', { description: result.error })
+      return
+    }
+
+    const isRural = /rural|cat 153|agronegocio/i.test(pendingClosedLead.name || '')
+    triggerSaleConfetti(isRural)
+    setAssistantServerAnalysis(null)
+    setAssistantServerMeta(null)
+    toast.success('Lead Fechado!', { description: `${pendingClosedLead.name} foi movido para Fechado e o contrato anexado.` })
+  }
 
   return (
     <>
@@ -1393,37 +1628,175 @@ export default function PipelineBoard({
         </Link>
       </div>
 
-      {/* KPIs Section */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-        {kpis.map((kpi) => (
-          <div
-            key={kpi.label}
-            style={{
-              padding: '20px',
-              borderRadius: '18px',
-              background: 'rgba(255,255,255,0.02)',
-              border: '1px solid rgba(255,255,255,0.04)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {kpi.label}
-              </span>
-              <kpi.icon size={14} style={{ color: kpi.color, opacity: 0.8 }} />
-            </div>
-            <div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#fff', lineHeight: 1 }}>
-                {kpi.value}
-              </div>
-              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '6px', fontWeight: 500 }}>
-                {kpi.detail}
-              </div>
-            </div>
+      {/* Ações Prioritárias */}
+      <div style={{ marginBottom: '32px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <Wand2 size={20} color="#f59e0b" />
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 900, color: '#e2e8f0', letterSpacing: '0.02em' }}>Atenção Requerida</h2>
+          <span style={{ padding: '4px 10px', borderRadius: '99px', background: 'rgba(245,158,11,0.15)', color: '#f59e0b', fontSize: '0.75rem', fontWeight: 800 }}>
+            {priorityLeads.length} leads
+          </span>
+        </div>
+        
+        {priorityLeads.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {['Proposta', 'Apresentacao', 'Qualificacao', 'Contato Inicial'].map(stageGroup => {
+              const stageLeads = priorityLeads.filter(l => l.stage === stageGroup);
+              if (stageLeads.length === 0) return null;
+              
+              return (
+                <div key={stageGroup} style={{ background: 'rgba(15,23,42,0.4)', padding: '16px', borderRadius: '12px', border: `1px solid ${stageColors[stageGroup as Stage]}20` }}>
+                  <div style={{ fontSize: '0.85rem', color: stageColors[stageGroup as Stage], fontWeight: 800, textTransform: 'uppercase', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: stageColors[stageGroup as Stage] }}></div>
+                    {stageDisplay[stageGroup as Stage]?.label || stageGroup} ({stageLeads.length})
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', overflowX: 'auto', paddingBottom: '8px', scrollSnapType: 'x mandatory' }}>
+                    {stageLeads.map(lead => {
+                      const stageNorm = NORMALIZED_STAGE_MAP[lead.stage || ''] || lead.stage
+                      const isProposta = stageNorm === 'Proposta'
+                      const isApresentacao = stageNorm === 'Apresentacao'
+                      const currentStageColor = stageColors[lead.stage as Stage] || 'var(--brand-border)'
+
+                      const daysSinceContact = getDaysSinceContact(lead, leadTimelineMap.get(lead.id))
+                      const overdueDays = daysSinceContact - (CADENCE_DAYS[lead.stage as Stage] || 999)
+                      const isOverdue = overdueDays > 0
+
+                      const pulseClass = isProposta ? 'pulse-red-border' : (isApresentacao ? 'pulse-amber-border' : '')
+                      const leadBorderColor = currentStageColor
+                      const leadBackground = isProposta 
+                        ? 'linear-gradient(180deg, rgba(69,10,10,0.6), rgba(15,23,42,0.96))' 
+                        : isApresentacao
+                        ? 'linear-gradient(180deg, rgba(69,50,0,0.6), rgba(15,23,42,0.96))'
+                        : `linear-gradient(180deg, ${currentStageColor}33, rgba(15,23,42,0.96))`
+                        
+                      const leadShadow = isProposta || isApresentacao
+                        ? `0 0 25px ${currentStageColor}80, 0 0 10px ${currentStageColor}33`
+                        : `0 0 15px ${currentStageColor}1A`
+
+                      const stageBadge = (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: `${currentStageColor}40`, color: currentStageColor, padding: '2px 4px', borderRadius: '4px', fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase', boxShadow: isProposta || isApresentacao ? `0 0 10px ${currentStageColor}80` : 'none' }}>
+                          {isProposta ? <Target size={10}/> : isApresentacao ? <Sparkles size={10}/> : stageNorm === 'Qualificacao' ? <Wand2 size={10}/> : <History size={10}/>} 
+                          {stageDisplay[lead.stage as Stage]?.label || lead.stage}
+                        </div>
+                      )
+                      
+                      const actionPlanBg = `${currentStageColor}1A`
+                      const actionPlanBorder = `${currentStageColor}66`
+                      const actionPlanColor = '#ffffff'
+                      
+                      const planData = urgentActionPlans[lead.id]
+                      
+                      // Regras Específicas de Ação Baseadas no Estágio
+                      let specificAction = ''
+                      if (lead.stage === 'Contato Inicial') specificAction = 'Ligar, qualificar o lead e avançar para Qualificação.'
+                      else if (lead.stage === 'Qualificacao') specificAction = 'Apresentar a solução e identificar dores (SPIN).'
+                      else if (lead.stage === 'Proposta') specificAction = 'Follow-up de proposta comercial. Fechamento.'
+                      else if (lead.stage === 'Apresentacao') specificAction = 'Contornar objeções e ajustar contrato.'
+                      else specificAction = 'Retomar contato e alinhar próximos passos.'
+
+                      const baseFallbackUrgent = `Prioridade Máxima: ${specificAction}`
+                      const baseFallbackOverdue = `Atrasado: ${specificAction}`
+                      
+                      let aiActionPlan = isProposta ? baseFallbackUrgent : baseFallbackOverdue;
+                      if (planData && Array.isArray(planData.acoes_recomendadas) && planData.acoes_recomendadas.length > 0) {
+                        aiActionPlan = planData.acoes_recomendadas.map((a: string, i: number) => `${i + 1}º ${a}`).join(' | ');
+                      } else if (planData && planData.alerta_vermelho) {
+                        aiActionPlan = 'ALERTA: ' + (planData.dor_principal || specificAction);
+                      }
+
+                      return (
+                        <div
+                          key={`priority-${lead.id}`}
+                          className={pulseClass}
+                          onClick={() => openLeadTimeline(lead)}
+                          style={{
+                            flexShrink: 0,
+                            width: '210px',
+                            background: leadBackground,
+                            border: `2px solid ${leadBorderColor}`,
+                            borderRadius: '8px',
+                            padding: '4px 6px',
+                            cursor: 'pointer',
+                            boxShadow: leadShadow,
+                            scrollSnapAlign: 'start',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '3px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ fontWeight: 900, fontSize: '0.85rem', color: leadBorderColor, lineHeight: 1.1, textTransform: 'uppercase' }}>{lead.name}</div>
+                            {stageBadge}
+                          </div>
+                          
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Estágio: <strong style={{ color: stageColors[lead.stage as Stage] }}>{stageDisplay[lead.stage as Stage]?.label || lead.stage}</strong></div>
+                          </div>
+                          
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '2px', marginBottom: '2px' }}>
+                            <button
+                              type="button"
+                              title="Ligar via GoTo"
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const num = (lead.phone || lead.whatsapp || '').replace(/\D/g, '')
+                                if (num) window.open(`tel:${num}`)
+                                setCallLogLead(lead)
+                              }}
+                              style={{ background: 'rgba(34,197,94,0.1)', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', color: '#22c55e', display: 'flex' }}
+                            >
+                              <PhoneCall size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              title="Registrar ligacao"
+                              onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setCallLogLead(lead); }}
+                              style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', color: '#3b82f6', display: 'flex' }}
+                            >
+                              <Phone size={12} />
+                            </button>
+                            <button type="button" onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); handleContactAction('whatsapp', lead); }} style={{ background: 'rgba(16,185,129,0.1)', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', color: '#10b981', display: 'flex' }}>
+                              <MessageSquare size={12} />
+                            </button>
+                            <button type="button" onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); handleContactAction('email', lead); }} style={{ background: 'rgba(245,158,11,0.1)', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', color: '#f59e0b', display: 'flex' }}>
+                              <Mail size={12} />
+                            </button>
+                          </div>
+
+
+                          <div style={{ marginTop: 'auto', background: actionPlanBg, border: `1px solid ${actionPlanBorder}`, padding: '4px 6px', borderRadius: '6px', position: 'relative' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.65rem', color: leadBorderColor, fontWeight: 900, textTransform: 'uppercase' }}>
+                                <Sparkles size={10} color={leadBorderColor} className={pulseClass} />
+                                AÇÃO
+                              </div>
+                              {isOverdue && (
+                                <div style={{ fontSize: '0.65rem', color: leadBorderColor, fontWeight: 900, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '2px', background: 'rgba(0,0,0,0.2)', padding: '2px 4px', borderRadius: '4px' }}>
+                                  🚨 {overdueDays}d ATRASO
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: actionPlanColor, lineHeight: 1.2, fontWeight: 600 }}>
+                              <div style={{ color: leadBorderColor, fontWeight: 900, display: 'block', marginBottom: '2px' }}>{aiActionPlan}</div>
+                              {lead.ai_summary || getLeadNextAction(lead)}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
           </div>
-        ))}
+        ) : (
+          <div style={{ padding: '32px', textAlign: 'center', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', border: '1px dashed rgba(255,255,255,0.1)', color: '#94a3b8' }}>
+            <Sparkles size={24} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+            <div>Nenhuma ação urgente pendente. Seu funil está em dia!</div>
+          </div>
+        )}
       </div>
 
       {/* Legend & Count */}
@@ -1454,60 +1827,78 @@ export default function PipelineBoard({
         </div>
       </div>
 
-      {/* Stage Summary Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px', marginBottom: '28px' }}>
+      {/* Main Board */}
+      <div id="pipeline-board" style={{ display: 'flex', gap: '16px', overflowX: 'auto', paddingBottom: '16px', width: '100%', minWidth: '100%', justifyContent: 'center' }}>
         {stages.map((stage) => {
           const stageLeads = getLeadsByStage(stage)
+          const isFechado = stage === 'Fechado'
           const avgDays = stageLeads.length ? Math.round(stageLeads.reduce((sum, l) => sum + l.days, 0) / stageLeads.length) : 0
           return (
-            <div
-              key={stage}
-              style={{
-                background: 'linear-gradient(180deg, rgba(15,23,42,0.78), rgba(15,23,42,0.58))',
-                border: `1px solid ${stageColors[stage]}35`,
-                borderRadius: '16px',
-                padding: '16px',
-                transition: 'all 0.2s',
-              }}
-            >
-              <div style={{ fontSize: '0.7rem', color: stageColors[stage], fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{stageDisplay[stage].label}</div>
-              <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: '12px', marginTop: '8px' }}>
-                <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#fff' }}>{stageLeads.length}</div>
-                {stageLeads.length > 0 && <div style={{ fontSize: '0.76rem', color: '#94a3b8' }}>{avgDays}d médio</div>}
-              </div>
-              <div style={{ marginTop: '8px', display: 'grid', gap: '4px' }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{stageLeads.length ? stageDisplay[stage].detail : 'Sem oportunidades nesta etapa'}</div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Main Board */}
-      <div id="pipeline-board" style={{ display: 'flex', gap: '16px', overflowX: 'auto', paddingBottom: '16px' }}>
-        {stages.map((stage) => {
-          const stageLeads = getLeadsByStage(stage)
-          return (
-            <div key={stage} style={{ flexShrink: 0, width: '280px' }} onDrop={(e) => handleDrop(e, stage)} onDragOver={handleDragOver}>
+            <div key={stage} style={{ flexShrink: 0, width: '250px' }} onDrop={(e) => handleDrop(e, stage)} onDragOver={handleDragOver}>
+              
+              {/* Resumo da Etapa Integrado na Coluna */}
               <div
                 style={{
-                  padding: '12px 14px',
+                  background: 'linear-gradient(180deg, rgba(15,23,42,0.78), rgba(15,23,42,0.58))',
+                  border: `1px solid ${stageColors[stage]}35`,
+                  borderRadius: '16px',
+                  padding: '16px',
+                  marginBottom: '20px',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <div style={{ fontSize: '0.7rem', color: stageColors[stage], fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{stageDisplay[stage].label}</div>
+                <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: '12px', marginTop: '8px' }}>
+                  <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#fff' }}>{stageLeads.length}</div>
+                  {stageLeads.length > 0 && <div style={{ fontSize: '0.76rem', color: '#94a3b8' }}>{avgDays}d médio</div>}
+                </div>
+                <div style={{ marginTop: '8px', display: 'grid', gap: '4px' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{stageLeads.length ? stageDisplay[stage].detail : 'Sem oportunidades'}</div>
+                </div>
+              </div>
+              <div
+                style={{
+                  padding: isFechado ? '16px 14px' : '12px 14px',
                   borderRadius: '14px 14px 0 0',
-                  background: `${stageColors[stage]}15`,
-                  borderBottom: `2px solid ${stageColors[stage]}`,
+                  background: isFechado ? 'linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02))' : `${stageColors[stage]}15`,
+                  borderBottom: isFechado ? `3px solid ${stageColors[stage]}` : `2px solid ${stageColors[stage]}`,
+                  borderTop: isFechado ? `1px solid rgba(255,255,255,0.1)` : 'none',
+                  borderLeft: isFechado ? `1px solid rgba(255,255,255,0.1)` : 'none',
+                  borderRight: isFechado ? `1px solid rgba(255,255,255,0.1)` : 'none',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: 800, color: stageColors[stage], textTransform: 'uppercase', letterSpacing: '0.08em' }}>{stageDisplay[stage].label}</span>
-                  <span style={{ background: `${stageColors[stage]}30`, color: stageColors[stage], borderRadius: '99px', padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <h3 style={{ 
+                        fontWeight: 800, 
+                        fontSize: isFechado ? '0.95rem' : '0.85rem', 
+                        color: isFechado ? '#10b981' : '#e2e8f0',
+                        letterSpacing: '0.02em',
+                        textTransform: 'uppercase'
+                      }}>
+                        {stageDisplay[stage]?.label || stage}
+                      </h3>
+                    </div>
+                  <span style={{ background: isFechado ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.1)', color: isFechado ? '#34d399' : '#cbd5e1', padding: '2px 8px', borderRadius: '99px', fontSize: '0.7rem', fontWeight: 800 }}>
                     {stageLeads.length}
                   </span>
                 </div>
-                <div style={{ marginTop: '6px', fontSize: '0.72rem', color: '#94a3b8' }}>{stageDisplay[stage].detail}</div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: '200px', padding: '10px 0' }}>
-                {stageLeads.map((lead) => {
+              <div style={{ 
+                display: 'flex', flexDirection: 'column', gap: '10px', minHeight: '70vh', padding: '10px 0',
+                background: isFechado ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.01)',
+                borderLeft: isFechado ? '1px solid rgba(16,185,129,0.15)' : '1px dashed rgba(255,255,255,0.05)',
+                borderRight: isFechado ? '1px solid rgba(16,185,129,0.15)' : '1px dashed rgba(255,255,255,0.05)',
+                borderBottom: isFechado ? '1px solid rgba(16,185,129,0.15)' : '1px dashed rgba(255,255,255,0.05)',
+                borderRadius: '0 0 14px 14px',
+              }}>
+                {stageLeads.length > 50 && (
+                  <div style={{ fontSize: '0.65rem', color: '#f59e0b', textAlign: 'center', margin: '0 10px 8px', padding: '4px', background: 'rgba(245,158,11,0.1)', borderRadius: '4px' }}>
+                    Mostrando 50 de {stageLeads.length}.
+                  </div>
+                )}
+                {stageLeads.slice(0, 50).map((lead) => {
                   const temperature = getLeadTemperature(lead)
                   const attention = getLeadAttention(lead)
                   const assistantRanking = assistantRecommendationMap.get(lead.id)
@@ -1519,55 +1910,52 @@ export default function PipelineBoard({
                   const isOverdue = overdueDays > 0
                   const isWarning = !isOverdue && lead.days >= (CADENCE_DAYS[lead.stage] || 999) * 0.75
 
-                  const isUrgent = ['Proposta', 'Negociacao', 'Negociação'].includes(lead.stage || '')
-                  const leadBorderColor = isUrgent
-                    ? '#ef4444'
-                    : isOverdue
-                    ? '#f59e0b'
-                    : isAssistantRecommended
-                      ? 'rgba(251,191,36,0.48)'
-                      : isAssistantFocused
-                        ? 'rgba(96,165,250,0.8)'
-                        : 'var(--brand-border)'
-                  const leadBackground = isUrgent 
-                    ? 'linear-gradient(180deg, rgba(69,10,10,0.4), rgba(15,23,42,0.96))'
-                    : isAssistantRecommended
+                  const stageNorm = NORMALIZED_STAGE_MAP[lead.stage || ''] || lead.stage
+                  const isProposta = stageNorm === 'Proposta'
+                  const isApresentacao = stageNorm === 'Apresentacao'
+                  const currentStageColor = stageColors[stage] || 'var(--brand-border)'
+
+                  const leadBorderColor = currentStageColor
+
+                  const leadBackground = isAssistantRecommended
                     ? 'linear-gradient(180deg, rgba(44,38,14,0.96), rgba(15,23,42,0.96))'
                     : 'var(--brand-surface)'
-                  const leadShadow = isUrgent
-                    ? '0 0 15px rgba(239,68,68,0.4), 0 18px 36px rgba(2,6,23,0.15)'
-                    : isOverdue
+                  const leadShadow = isProposta
+                    ? '0 0 15px rgba(239,68,68,0.2), 0 18px 36px rgba(2,6,23,0.15)'
+                    : isApresentacao
                     ? '0 0 15px rgba(245,158,11,0.2), 0 18px 36px rgba(2,6,23,0.15)'
                     : isAssistantRecommended
                       ? '0 0 0 1px rgba(251,191,36,0.15), 0 20px 40px rgba(251,191,36,0.12)'
                       : isAssistantFocused
                         ? '0 0 0 1px rgba(96,165,250,0.15), 0 20px 40px rgba(2,6,23,0.12)'
-                        : '0 18px 36px rgba(2,6,23,0.10)'
-                  const pulseClass = isUrgent ? 'pulse-red-border' : (isOverdue ? 'pulse-amber-border' : '')
+                        : `0 0 8px ${currentStageColor}33, 0 18px 36px rgba(2,6,23,0.10)`
+                  const pulseClass = isProposta ? 'pulse-red-border' : (isApresentacao ? 'pulse-amber-border' : '')
                   return (
                     <div
                       id={`lead-card-${lead.id}`}
                       key={lead.id}
-                      className={pulseClass}
+                      className={`lead-card ${pulseClass}`}
                       draggable
                       onDragStart={(e) => handleDragStart(e, lead.id)}
                       style={{
                         background: leadBackground,
-                        border: isUrgent ? '2px solid #ef4444' : (isOverdue ? '2px solid #f59e0b' : `1px solid ${leadBorderColor}`),
+                        border: `1px solid ${leadBorderColor}`,
                         borderRadius: '14px',
                         padding: '14px',
                         cursor: 'grab',
                         transition: 'all 0.2s',
                         boxShadow: leadShadow,
                         position: 'relative',
-                        zIndex: isUrgent || isOverdue ? 1 : 0,
+                        zIndex: isProposta || isApresentacao ? 1 : 0,
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = isAssistantRecommended ? 'rgba(251,191,36,0.68)' : stageColors[stage]
+                        e.currentTarget.style.borderColor = currentStageColor
+                        e.currentTarget.style.boxShadow = `0 0 18px ${currentStageColor}66`
                         e.currentTarget.style.transform = 'translateY(-2px)'
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.borderColor = leadBorderColor
+                        e.currentTarget.style.boxShadow = leadShadow
                         e.currentTarget.style.transform = 'none'
                       }}
                     >
@@ -1592,18 +1980,18 @@ export default function PipelineBoard({
                       </div>
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2px' }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#e2e8f0' }}>{lead.name}</div>
+                        <div style={{ fontWeight: 700, fontSize: '0.8rem', color: currentStageColor }}>{lead.name}</div>
                         <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); openEditLead(lead) }}
+                            onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); openEditLead(lead) }}
                             style={{ background: 'rgba(251,191,36,0.1)', border: 'none', borderRadius: '5px', padding: '3px', cursor: 'pointer', color: '#f59e0b', display: 'flex' }}
                           >
                             <Pencil size={11} />
                           </button>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); handleDeleteLead(lead) }}
+                            onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); handleDeleteLead(lead) }}
                             style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '5px', padding: '3px', cursor: 'pointer', color: '#ef4444', display: 'flex' }}
                           >
                             <Trash2 size={11} />
@@ -1611,26 +1999,10 @@ export default function PipelineBoard({
                         </div>
                       </div>
 
-                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '10px' }}>{lead.company || 'Sem empresa'}</div>
+                      {lead.company && <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '6px' }}>{lead.company}</div>}
 
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-                        {lead.client_status_label ? (
-                          <span
-                            style={{
-                              padding: '4px 8px',
-                              borderRadius: '999px',
-                              fontSize: '0.65rem',
-                              fontWeight: 800,
-                              color: getClientBadgeStyle(lead.client_status_label).color,
-                              background: getClientBadgeStyle(lead.client_status_label).background,
-                              border: `1px solid ${getClientBadgeStyle(lead.client_status_label).border}`,
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.08em',
-                            }}
-                          >
-                            {lead.client_status_label}
-                          </span>
-                        ) : null}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+                        
                         {lead.contract_number ? (
                           <span style={{ padding: '4px 8px', borderRadius: '999px', fontSize: '0.65rem', fontWeight: 800, color: '#bfdbfe', background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                             Contrato {lead.contract_number}
@@ -1642,14 +2014,14 @@ export default function PipelineBoard({
                           </span>
                         ) : null}
                         {lead.contract_pdf_name ? (
-                          <span style={{ padding: '4px 8px', borderRadius: '999px', fontSize: '0.65rem', fontWeight: 800, color: '#38bdf8', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          <span style={{ padding: '4px 8px', borderRadius: '999px', fontSize: '0.65rem', fontWeight: 800, color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                             PDF ok
                           </span>
                         ) : null}
                         {lead.client_id ? (
                           <a
                             href={`/dashboard/clientes?cliente=${encodeURIComponent(lead.client_id)}`}
-                            onClick={(event) => event.stopPropagation()}
+                            onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}
                             style={{ padding: '4px 8px', borderRadius: '999px', fontSize: '0.65rem', fontWeight: 900, color: '#bfdbfe', background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)', textTransform: 'uppercase', letterSpacing: '0.08em', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                           >
                             <ExternalLink size={10} />
@@ -1716,10 +2088,59 @@ export default function PipelineBoard({
                           </span>
                         </div>
 
-                        <div style={{ padding: '10px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                          <div style={{ fontSize: '0.65rem', color: '#93c5fd', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Proximo passo</div>
-                          <div style={{ marginTop: '5px', color: '#dbe6f1', fontSize: '0.76rem', lineHeight: 1.45 }}>{getLeadNextAction(lead)}</div>
-                        </div>
+                        {(() => {
+                          if (lead.stage === 'Fechado') {
+                            return (
+                              <div style={{ padding: '12px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', position: 'relative' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.65rem', color: '#34d399', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                                  <Sparkles size={12} color="#34d399" />
+                                  Contrato Fechado
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  {!archivedContracts.has(lead.id) && (
+                                    <button
+                                      type="button"
+                                      onTouchStart={(e) => e.stopPropagation()}
+                                      onTouchEnd={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); setArchivedContracts(prev => new Set(prev).add(lead.id)); toast.success('Contrato confirmado! Siga para o Onboarding.') }}
+                                      style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '6px', padding: '7px 12px', fontSize: '0.72rem', fontWeight: 800, cursor: 'pointer', width: '100%' }}
+                                    >
+                                      ✓ Confirmar Contrato Assinado
+                                    </button>
+                                  )}
+                                  <Link
+                                    href={`/dashboard/onboarding`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', background: 'linear-gradient(135deg, #eab308, #ca8a04)', color: '#000', border: 'none', borderRadius: '6px', padding: '8px 12px', fontSize: '0.75rem', fontWeight: 900, cursor: 'pointer', width: '100%', textDecoration: 'none', textAlign: 'center' as const }}
+                                  >
+                                    🚀 Iniciar Onboarding
+                                  </Link>
+                                </div>
+                              </div>
+                            )
+                          }
+
+                          const planData = urgentActionPlans[lead.id]
+                          let aiActionPlan = getPalinIAPrioritizedPlan(lead);
+                          if (planData && Array.isArray(planData.acoes_recomendadas) && planData.acoes_recomendadas.length > 0) {
+                            aiActionPlan = planData.acoes_recomendadas[0]; // Show the top priority action
+                          } else if (planData && planData.alerta_vermelho) {
+                            aiActionPlan = 'ALERTA: ' + (planData.dor_principal || 'Retome o contato urgente.');
+                          }
+
+                          const isUrgent = ['Proposta', 'Negociacao', 'Negociação'].includes(lead.stage || '')
+                          return (
+                            <div style={{ padding: '12px', borderRadius: '10px', background: isUrgent ? 'rgba(239, 68, 68, 0.1)' : 'rgba(251,191,36,0.1)', border: isUrgent ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(251,191,36,0.3)', position: 'relative' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.65rem', color: isUrgent ? '#fca5a5' : '#fbbf24', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>
+                                <Sparkles size={12} color={isUrgent ? '#f87171' : '#fbbf24'} />
+                                Palin IA: Ação Sugerida
+                              </div>
+                              <div style={{ color: '#f8fafc', fontSize: '0.8rem', fontWeight: 700, lineHeight: 1.45 }}>
+                                {aiActionPlan}
+                              </div>
+                            </div>
+                          )
+                        })()}
 
                         <div style={{ fontSize: '0.72rem', color: lead.days >= 20 || lead.ai_status === 'revisar' ? '#fca5a5' : '#94a3b8', lineHeight: 1.45 }}>
                           {attention}
@@ -1763,7 +2184,10 @@ export default function PipelineBoard({
                           <button
                             type="button"
                             title="Ligar via GoTo"
-                            onClick={() => {
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
                               const num = (lead.phone || lead.whatsapp || '').replace(/\D/g, '')
                               if (num) window.open(`tel:${num}`)
                               setCallLogLead(lead)
@@ -1775,30 +2199,59 @@ export default function PipelineBoard({
                           <button
                             type="button"
                             title="Registrar ligacao"
-                            onClick={() => setCallLogLead(lead)}
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCallLogLead(lead);
+                            }}
                             style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '6px', padding: '4px', cursor: 'pointer', color: '#3b82f6', display: 'flex' }}
                           >
                             <Phone size={12} />
                           </button>
-                          <button type="button" onClick={() => handleContactAction('whatsapp', lead)} style={{ background: 'rgba(16,185,129,0.1)', border: 'none', borderRadius: '6px', padding: '4px', cursor: 'pointer', color: '#10b981', display: 'flex' }}>
+                          <button type="button" onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); handleContactAction('whatsapp', lead); }} style={{ background: 'rgba(16,185,129,0.1)', border: 'none', borderRadius: '6px', padding: '4px', cursor: 'pointer', color: '#10b981', display: 'flex' }}>
                             <MessageSquare size={12} />
                           </button>
-                          <button type="button" onClick={() => handleContactAction('email', lead)} style={{ background: 'rgba(245,158,11,0.1)', border: 'none', borderRadius: '6px', padding: '4px', cursor: 'pointer', color: '#f59e0b', display: 'flex' }}>
+                          <button type="button" onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); handleContactAction('email', lead); }} style={{ background: 'rgba(245,158,11,0.1)', border: 'none', borderRadius: '6px', padding: '4px', cursor: 'pointer', color: '#f59e0b', display: 'flex' }}>
                             <Mail size={12} />
                           </button>
                         </div>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          {lead.stage === 'Contato Inicial' ? (
+                            <button
+                              type="button"
+                              onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                const result = await updateLeadStage(lead.id, 'Qualificacao')
+                                if (result.success) {
+                                  setLeads((prev) => prev.map((l) => l.id === lead.id ? { ...l, stage: 'Qualificacao' } : l))
+                                  setAssistantServerAnalysis(null)
+                                  setAssistantServerMeta(null)
+                                  triggerSingleBoom()
+                                  toast.success('Lead qualificado!', { description: `${lead.name} avançou para Qualificação.` })
+                                } else {
+                                  toast.error('Erro ao avançar lead', { description: result.error })
+                                }
+                              }}
+                              style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', color: '#a5b4fc', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', fontWeight: 900 }}
+                            >
+                              <ChevronRight size={12} />
+                              Qualificar
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); openLeadMeeting(lead); }}
+                              style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.16)', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', color: '#86efac', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', fontWeight: 800 }}
+                            >
+                              <CalendarDays size={12} />
+                              Reunião
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => openLeadMeeting(lead)}
-                            style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.16)', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', color: '#86efac', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', fontWeight: 800 }}
-                          >
-                            <CalendarDays size={12} />
-                            Reunião
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openLeadTimeline(lead)}
+                            onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); openLeadTimeline(lead); }}
                             style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.16)', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', color: '#93c5fd', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', fontWeight: 800 }}
                           >
                             <History size={12} />
@@ -1806,7 +2259,7 @@ export default function PipelineBoard({
                           </button>
                           <button
                             type="button"
-                            onClick={() => openIntelligence(lead)}
+                            onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); openIntelligence(lead); }}
                             style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.16)', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', color: 'var(--brand-primary)', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', fontWeight: 800 }}
                           >
                             <Brain size={12} />
@@ -2014,8 +2467,8 @@ export default function PipelineBoard({
                       {selectedLeadTimeline?.activities?.[0]?.next_step || getLeadNextAction(selectedLead)}
                     </div>
                   </div>
-                  <div style={{ padding: '14px', borderRadius: '14px', background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.12)' }}>
-                    <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#3b82f6', fontWeight: 800 }}>Faturamento Est.</div>
+                  <div style={{ padding: '14px', borderRadius: '14px', background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.12)' }}>
+                    <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#60a5fa', fontWeight: 800 }}>Faturamento Est.</div>
                     <div style={{ marginTop: '8px', fontSize: '1.1rem', fontWeight: 900, color: '#f8fafc' }}>
                       {formatCompactCurrency((selectedLead as LeadType & { faturamento_estimado?: number }).faturamento_estimado || selectedLead.value)}
                     </div>
@@ -2813,9 +3266,60 @@ export default function PipelineBoard({
           </div>
         </div>
       )}
+
+      {showContractModal && pendingClosedLead && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 600 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowContractModal(false) }}
+        >
+          <div style={{ background: '#161b22', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px', display: 'grid', gap: '14px' }}>
+            <div style={{ fontWeight: 800, color: '#10b981', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FileText size={18} />
+              Arquivar Contrato
+            </div>
+            <div style={{ fontSize: '0.85rem', color: '#cbd5e1', marginBottom: '8px' }}>
+              Parabéns pelo fechamento de <strong>{pendingClosedLead.name}</strong>! Antes de finalizar, arquive o contrato assinado para seguir ao Onboarding.
+            </div>
+            
+            <div style={{ display: 'grid', gap: '10px' }}>
+              <label style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700 }}>Documento do Contrato *</label>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx"
+                onChange={(e) => setContractFile(e.target.files?.[0] || null)}
+                style={{ background: '#0d1117', color: '#e2e8f0', border: '1px dashed rgba(255,255,255,0.2)', borderRadius: '8px', padding: '12px 10px', fontSize: '0.82rem', cursor: 'pointer' }}
+              />
+            </div>
+            
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '12px' }}>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setShowContractModal(false)
+                  setPendingClosedLead(null)
+                  setContractFile(null)
+                }} 
+                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '7px 14px', cursor: 'pointer', color: '#94a3b8', fontSize: '0.8rem' }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmContractUpload}
+                disabled={isUploadingContract || !contractFile}
+                style={{ background: '#10b981', border: 'none', borderRadius: '8px', padding: '7px 16px', cursor: (isUploadingContract || !contractFile) ? 'not-allowed' : 'pointer', color: '#ffffff', fontWeight: 800, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '6px', opacity: (isUploadingContract || !contractFile) ? 0.6 : 1 }}
+              >
+                {isUploadingContract ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Wand2 size={13} />}
+                Confirmar Fechamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
+
 
 
 

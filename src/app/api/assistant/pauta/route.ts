@@ -63,7 +63,6 @@ Seja objetivo. Máximo 400 palavras.`
       model: openai('gpt-4o-mini'),
       system: 'Você é um assistente de gestão comercial. Gere pautas de reunião claras, objetivas e profissionais em português do Brasil.',
       prompt,
-      maxOutputTokens: 800,
     })
 
     return NextResponse.json({ pauta: result.text })

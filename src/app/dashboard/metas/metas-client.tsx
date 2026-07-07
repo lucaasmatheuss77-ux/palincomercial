@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Target, Plus, Trophy, TrendingUp, Users } from 'lucide-react'
+import { Edit3, Target, Plus, Trash2, Trophy, TrendingUp, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import ActionDialog from '@/components/action-dialog'
 
@@ -73,6 +73,7 @@ export default function MetasClient({
   const [showNewGoal, setShowNewGoal] = useState(false)
   const [goals, setGoals] = useState<SalesGoal[]>(initialGoals)
   const [saving, setSaving] = useState(false)
+  const [editingGoal, setEditingGoal] = useState<SalesGoal | null>(null)
   const [draft, setDraft] = useState({
     period: currentPeriod(),
     product_id: '',
@@ -124,6 +125,77 @@ export default function MetasClient({
     }
   }
 
+  function closeGoalDialog() {
+    setShowNewGoal(false)
+    setEditingGoal(null)
+    setDraft({ period: currentPeriod(), product_id: '', consultant_id: '', goal_contracts: '', notes: '' })
+  }
+
+  function openEditGoal(goal: SalesGoal) {
+    setEditingGoal(goal)
+    setDraft({
+      period: goal.period,
+      product_id: goal.product_id || '',
+      consultant_id: goal.consultant_id || '',
+      goal_contracts: String(goal.goal_contracts || ''),
+      notes: goal.notes || '',
+    })
+    setShowNewGoal(true)
+  }
+
+  async function handleSaveGoal() {
+    if (!editingGoal) {
+      await handleCreateGoal()
+      return
+    }
+
+    if (!draft.period || !draft.goal_contracts) {
+      toast.error('Informe o periodo e a meta de contratos.')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const res = await fetch('/api/goals', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingGoal.id,
+          period: draft.period,
+          product_id: draft.product_id || null,
+          consultant_id: draft.consultant_id || null,
+          goal_contracts: Number(draft.goal_contracts),
+          notes: draft.notes,
+        }),
+      })
+
+      if (!res.ok) {
+        toast.error('Erro ao atualizar meta.')
+        return
+      }
+
+      const updated = await res.json()
+      setGoals((prev) => prev.map((goal) => goal.id === editingGoal.id ? updated : goal))
+      toast.success('Meta atualizada.')
+      closeGoalDialog()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteGoal(goal: SalesGoal) {
+    if (!window.confirm(`Excluir a meta de ${formatPeriod(goal.period)}?`)) return
+
+    const res = await fetch(`/api/goals?id=${goal.id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      toast.error('Erro ao excluir meta.')
+      return
+    }
+
+    setGoals((prev) => prev.filter((item) => item.id !== goal.id))
+    toast.success('Meta excluida.')
+  }
+
   // Calculate progress for goals
   const goalsWithProgress = goals.map((goal) => {
     let realized = 0
@@ -143,6 +215,13 @@ export default function MetasClient({
     const percent = goal.goal_contracts > 0 ? Math.round((realized / goal.goal_contracts) * 100) : 0
     return { ...goal, realized, percent }
   })
+
+  const goalsByPeriod = goalsWithProgress.reduce<Record<string, typeof goalsWithProgress>>((acc, goal) => {
+    acc[goal.period] ||= []
+    acc[goal.period].push(goal)
+    return acc
+  }, {})
+  const orderedGoalPeriods = Object.keys(goalsByPeriod).sort((a, b) => b.localeCompare(a))
 
   // ── Dados estáticos do plano bimestral Mai-Jun 2026 ──────────────────────────
   const METAS_DEPT = [
@@ -186,7 +265,7 @@ export default function MetasClient({
             Acompanhamento por contratos e produto · {memberRows.length} pessoas
           </p>
         </div>
-        <button type="button" className="btn-primary" onClick={() => setShowNewGoal(true)}>
+        <button type="button" className="btn-primary" onClick={() => { setEditingGoal(null); setShowNewGoal(true) }}>
           <Plus size={15} />
           Adicionar meta
         </button>
@@ -223,6 +302,63 @@ export default function MetasClient({
           <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#f8fafc' }}>{goals.length}</div>
         </div>
       </div>
+
+      <section className="glass-card" style={{ padding: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Target size={16} color="var(--brand-primary)" />
+            <h3 style={{ fontWeight: 800, fontSize: '1rem', color: '#f8fafc' }}>Metas criadas no sistema</h3>
+          </div>
+          <span style={{ color: 'var(--brand-muted)', fontSize: '0.78rem' }}>Essas metas alimentam o dashboard inicial.</span>
+        </div>
+
+        {orderedGoalPeriods.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', border: '1px dashed rgba(255,255,255,0.09)', borderRadius: 12, color: 'var(--brand-muted)' }}>
+            Nenhuma meta criada ainda. Cadastre a meta do mes para o painel inicial sair de zero.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 16 }}>
+            {orderedGoalPeriods.map((period) => (
+              <div key={period} style={{ display: 'grid', gap: 10 }}>
+                <div style={{ color: 'var(--brand-primary)', fontSize: '0.78rem', fontWeight: 900, textTransform: 'uppercase' }}>{formatPeriod(period)}</div>
+                {goalsByPeriod[period].map((goal) => (
+                  <div key={goal.id} style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)', padding: '14px 16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ fontWeight: 800, color: 'var(--brand-text)', fontSize: '0.88rem' }}>
+                          {goal.products ? `${goal.products.emoji} ${goal.products.name}` : 'Meta geral'}
+                          {goal.profiles ? ` - ${goal.profiles.full_name}` : ''}
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--brand-muted)', marginTop: 2 }}>{goal.notes || 'Sem observacao'}</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ color: goal.percent >= 100 ? '#6ee7b7' : 'var(--brand-primary)', fontSize: '0.9rem', fontWeight: 900 }}>{goal.realized}</span>
+                          <span style={{ color: 'var(--brand-muted)', fontSize: '0.82rem' }}> / {goal.goal_contracts} contratos</span>
+                        </div>
+                        <button type="button" className="btn-ghost" onClick={() => openEditGoal(goal)} style={{ padding: '7px 9px' }} aria-label="Editar meta">
+                          <Edit3 size={14} />
+                        </button>
+                        <button type="button" className="btn-ghost" onClick={() => handleDeleteGoal(goal)} style={{ padding: '7px 9px', color: '#f87171' }} aria-label="Excluir meta">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="progress-bar" style={{ height: 8 }}>
+                      <div className="progress-fill" style={{ width: `${Math.min(goal.percent, 100)}%`, background: goal.percent >= 100 ? '#10b981' : undefined }} />
+                    </div>
+                    <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', color: 'var(--brand-muted)', fontSize: '0.72rem' }}>
+                      <span>{goal.percent}% concluido</span>
+                      {goal.percent < 100 && <span>Faltam {Math.max(goal.goal_contracts - goal.realized, 0)} contratos</span>}
+                      {goal.percent >= 100 && <span style={{ color: '#10b981', fontWeight: 800 }}>Meta batida</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* ══ PAINEL BIMESTRAL MAI–JUN 2026 ══ */}
       <section className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -357,7 +493,7 @@ export default function MetasClient({
       </section>
 
       {/* Goals list */}
-      {goalsWithProgress.length > 0 && (
+      {false && goalsWithProgress.length > 0 && (
         <section className="glass-card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <Target size={16} color="var(--brand-primary)" />
@@ -509,15 +645,15 @@ export default function MetasClient({
       {/* ── DIALOG: Nova Meta ── */}
       <ActionDialog
         open={showNewGoal}
-        title="Adicionar meta"
+        title={editingGoal ? 'Editar meta' : 'Adicionar meta'}
         subtitle="Defina uma meta de contratos por período, produto ou consultor."
-        onClose={() => setShowNewGoal(false)}
+        onClose={closeGoalDialog}
         footer={
           <>
-            <button type="button" className="btn-ghost" onClick={() => setShowNewGoal(false)}>Cancelar</button>
-            <button type="button" className="btn-primary" onClick={handleCreateGoal} disabled={saving}>
+            <button type="button" className="btn-ghost" onClick={closeGoalDialog}>Cancelar</button>
+            <button type="button" className="btn-primary" onClick={handleSaveGoal} disabled={saving}>
               <Target size={14} />
-              {saving ? 'Salvando...' : 'Salvar meta'}
+              {saving ? 'Salvando...' : editingGoal ? 'Atualizar meta' : 'Salvar meta'}
             </button>
           </>
         }

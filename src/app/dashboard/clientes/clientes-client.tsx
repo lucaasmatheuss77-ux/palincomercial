@@ -1,8 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import type { CSSProperties } from 'react'
+import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { ClientDetailsPanel } from '../components/client-details-panel'
 import {
   CheckCircle2,
   AlertTriangle,
@@ -92,6 +95,8 @@ export type ClientRow = {
   }>
   createdAt: string | null
   updatedAt: string | null
+  services: Array<{ id: string; nome: string; status: string; tipo_honorario: string; honorario_valor: number | null; honorario_percentual: number | null; base_calculo: string | null }>
+  daysToExpire: number | null
 }
 
 type StatusTone = {
@@ -101,12 +106,12 @@ type StatusTone = {
 }
 
 const STATUS_TONES: Record<string, StatusTone> = {
-  'Cliente criado': { color: '#93c5fd', background: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.22)' },
-  'Contrato pendente': { color: 'var(--brand-primary)', background: 'rgba(251,191,36,0.12)', border: 'rgba(251,191,36,0.22)' },
-  'Contrato ativo': { color: '#86efac', background: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.22)' },
-  'A vencer': { color: '#facc15', background: 'rgba(250,204,21,0.12)', border: 'rgba(250,204,21,0.22)' },
-  Vencido: { color: '#fca5a5', background: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.22)' },
-  'Contrato cancelado': { color: '#cbd5e1', background: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.22)' },
+  'Cliente criado': { color: '#60a5fa', background: 'rgba(96,165,250,0.06)', border: 'rgba(96,165,250,0.15)' },
+  'Contrato pendente': { color: 'var(--brand-primary)', background: 'rgba(251,191,36,0.06)', border: 'rgba(251,191,36,0.15)' },
+  'Contrato ativo': { color: '#4ade80', background: 'rgba(34,197,94,0.06)', border: 'rgba(34,197,94,0.15)' },
+  'A vencer': { color: '#fbbf24', background: 'rgba(251,191,36,0.06)', border: 'rgba(251,191,36,0.15)' },
+  Vencido: { color: '#f87171', background: 'rgba(239,68,68,0.06)', border: 'rgba(239,68,68,0.15)' },
+  'Contrato cancelado': { color: '#94a3b8', background: 'rgba(148,163,184,0.06)', border: 'rgba(148,163,184,0.15)' },
 }
 
 function formatCurrency(value: number) {
@@ -143,6 +148,44 @@ function buildCrmLeadHref(leadId: string | null) {
   return `/dashboard/pipeline?lead=${encodeURIComponent(leadId)}`
 }
 
+type CnpjLookupData = {
+  cnpj: string
+  razaoSocial: string
+  nomeFantasia: string | null
+  situacao: string | null
+  atividadePrincipal: string | null
+  telefone: string | null
+  email: string | null
+  municipio: string | null
+  uf: string | null
+  origem: string
+}
+
+function maskCnpj(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 14)
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2')
+}
+
+const CRM_STAGE_COLORS: Record<string, string> = {
+  'Contato Inicial': '#9ca3af',
+  Qualificacao: '#3b82f6',
+  Apresentacao: '#eab308',
+  Proposta: '#ef4444',
+  Fechado: '#3b82f6',
+}
+
+const CRM_STAGE_LABELS: Record<string, string> = {
+  'Contato Inicial': 'Contato Inicial',
+  Qualificacao: 'Qualificacao',
+  Apresentacao: 'Apresentacao',
+  Proposta: 'Proposta',
+  Fechado: 'Fechamento',
+}
+
 
 export default function ClientesClient({
   rows,
@@ -156,6 +199,8 @@ export default function ClientesClient({
   initialSelectedClientId?: string | null
 }) {
   const router = useRouter()
+  const [localRows, setLocalRows] = useState(rows)
+  useEffect(() => { setLocalRows(rows) }, [rows])
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('Todos')
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -193,6 +238,8 @@ export default function ClientesClient({
     consultantId: '',
     productId: '',
   })
+  const [cnpjLookupLoading, setCnpjLookupLoading] = useState(false)
+  const [cnpjLookupData, setCnpjLookupData] = useState<CnpjLookupData | null>(null)
   const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null)
   const [selectedPdfPreview, setSelectedPdfPreview] = useState('')
   const [isPending, startTransition] = useTransition()
@@ -204,6 +251,7 @@ export default function ClientesClient({
   const [meetingFormOpen, setMeetingFormOpen] = useState(false)
   const [expandedMeetingId, setExpandedMeetingId] = useState<string | null>(null)
   const [pautaLoading, setPautaLoading] = useState(false)
+  const [audioUploading, setAudioUploading] = useState(false)
   const [meetingForm, setMeetingForm] = useState({
     meeting_date: new Date().toISOString().split('T')[0],
     title: '',
@@ -225,11 +273,11 @@ export default function ClientesClient({
   })
 
   const statusOptions = useMemo(() => ['Todos', ...Array.from(new Set(rows.map((row) => row.clientStatusLabel)))], [rows])
-  const crmStageOptions = ['Contato Inicial', 'Qualificacao', 'Apresentacao', 'Proposta', 'Negociacao', 'Fechado', 'Perdido']
+  const crmStageOptions = ['Contato Inicial', 'Qualificacao', 'Apresentacao', 'Proposta', 'Fechado']
 
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return rows.filter((row) => {
+    return localRows.filter((row) => {
       const matchesQuery =
         !q ||
         [row.name, row.company, row.consultant, row.product, row.contractNumber || '', row.email, row.phone, row.whatsapp]
@@ -239,7 +287,7 @@ export default function ClientesClient({
       const matchesStatus = statusFilter === 'Todos' || row.clientStatusLabel === statusFilter
       return matchesQuery && matchesStatus
     })
-  }, [query, rows, statusFilter])
+  }, [query, localRows, statusFilter])
 
   const selectedRow = useMemo(
     () => (selectedId ? filteredRows.find((row) => row.id === selectedId) || rows.find((row) => row.id === selectedId) || null : null),
@@ -251,8 +299,9 @@ export default function ClientesClient({
     const active = rows.filter((row) => row.clientStatusLabel === 'Contrato ativo' || row.clientStatusLabel === 'A vencer').length
     const pending = rows.filter((row) => row.clientStatusLabel === 'Contrato pendente').length
     const expiring = rows.filter((row) => row.clientStatusLabel === 'A vencer').length
-    const withoutPdf = rows.filter((row) => !row.pdfName && row.clientStatusLabel !== 'Cliente criado').length
-    return { total, active, pending, expiring, withoutPdf }
+    const withoutPdf = rows.filter((row) => !row.pdfName && row.clientStatusLabel !== 'Cliente criado' && row.clientStatusLabel !== 'Em Prospecção').length
+    const prospecting = rows.filter((row) => row.clientStatusLabel === 'Em Prospecção').length
+    return { total, active, pending, expiring, withoutPdf, prospecting }
   }, [rows])
 
   async function copyContact(row: ClientRow) {
@@ -296,6 +345,10 @@ export default function ClientesClient({
 
       toast.success(result.leadId ? 'Cliente criado e enviado ao CRM.' : 'Cliente criado com sucesso.')
       setCreateOpen(false)
+      setCnpjLookupData(null)
+      if (result.data?.id) {
+        setSelectedId(result.data.id)
+      }
       setCreateForm({
         name: '',
         company: '',
@@ -309,6 +362,44 @@ export default function ClientesClient({
       })
       router.refresh()
     })
+  }
+
+  async function handleLookupCnpj() {
+    const cnpj = createForm.document.replace(/\D/g, '')
+    if (cnpj.length !== 14) {
+      toast.error('Informe um CNPJ com 14 digitos.')
+      return
+    }
+
+    setCnpjLookupLoading(true)
+    setCnpjLookupData(null)
+    try {
+      const response = await fetch(`/api/cnpj/${cnpj}`)
+      const data = await response.json()
+
+      if (!response.ok) {
+        toast.error('CNPJ nao encontrado', { description: data.error || 'Confira o numero informado.' })
+        return
+      }
+
+      const lookup = data as CnpjLookupData
+      const companyName = lookup.nomeFantasia || lookup.razaoSocial
+      setCreateForm((current) => ({
+        ...current,
+        document: maskCnpj(lookup.cnpj),
+        company: lookup.razaoSocial || current.company,
+        name: current.name || companyName || lookup.razaoSocial,
+        email: current.email || lookup.email || '',
+        phone: current.phone || lookup.telefone || '',
+        whatsapp: current.whatsapp || lookup.telefone || '',
+      }))
+      setCnpjLookupData(lookup)
+      toast.success('Dados do CNPJ carregados.')
+    } catch {
+      toast.error('Falha ao consultar CNPJ.')
+    } finally {
+      setCnpjLookupLoading(false)
+    }
   }
 
   const selectedTone = selectedRow ? getTone(selectedRow.clientStatusLabel) : STATUS_TONES['Cliente criado']
@@ -382,7 +473,7 @@ export default function ClientesClient({
 
   async function handleGeneratePauta() {
     if (!meetingForm.recording_link.trim() && !selectedRow?.name) {
-      toast.error('Informe o link da gravacao ou o nome do cliente.')
+      toast.error('Informe o link da gravação ou o nome do cliente.')
       return
     }
     setPautaLoading(true)
@@ -407,6 +498,43 @@ export default function ClientesClient({
       toast.error('Falha ao conectar com a IA.')
     } finally {
       setPautaLoading(false)
+    }
+  }
+
+  async function handleUploadAudio(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setAudioUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('audio', file)
+      formData.append('clientId', selectedRow?.clientRecordId || '')
+
+      const response = await fetch('/api/meetings/transcribe', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json() as { transcript?: string; pauta?: string; summary?: string; recording_link?: string; error?: string }
+      
+      if (!response.ok || data.error) {
+        toast.error(data.error || 'Erro ao transcrever áudio.')
+        return
+      }
+
+      setMeetingForm((current) => ({
+        ...current,
+        pauta: data.pauta || data.transcript || current.pauta,
+        notes: data.summary ? (current.notes ? current.notes + '\\n\\nResumo IA:\\n' + data.summary : 'Resumo IA:\\n' + data.summary) : current.notes,
+        recording_link: data.recording_link || current.recording_link,
+      }))
+
+      toast.success('Áudio transcrito com sucesso!')
+    } catch {
+      toast.error('Falha ao enviar áudio.')
+    } finally {
+      setAudioUploading(false)
     }
   }
 
@@ -513,9 +641,9 @@ export default function ClientesClient({
         client_id: selectedRow.clientRecordId,
         contract_number: contractForm.contractNumber || null,
         value: Number(contractForm.contractValue || 0),
-        start_at: contractForm.startAt ? new Date(contractForm.startAt).toISOString() : null,
+        start_date: contractForm.startAt ? new Date(contractForm.startAt).toISOString() : null,
         signed_at: contractForm.signedAt ? new Date(contractForm.signedAt).toISOString() : null,
-        end_at: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : null,
+        end_date: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : null,
         notes: contractForm.notes || null,
         status: contractForm.status,
         signing_url: contractForm.signingUrl.trim() || null,
@@ -605,7 +733,7 @@ export default function ClientesClient({
     startTransition(async () => {
       const result = await activateContract(contractId, {
         signed_at: contractForm.signedAt ? new Date(contractForm.signedAt).toISOString() : undefined,
-        end_at: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : undefined,
+        end_date: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : undefined,
         notes: contractForm.notes || undefined,
       })
 
@@ -646,8 +774,8 @@ export default function ClientesClient({
 
     startTransition(async () => {
       const result = await renewContract(contractId, {
-        start_at: contractForm.startAt ? new Date(contractForm.startAt).toISOString() : null,
-        end_at: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : null,
+        start_date: contractForm.startAt ? new Date(contractForm.startAt).toISOString() : null,
+        end_date: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : null,
       })
 
       if (!result.success) {
@@ -659,6 +787,48 @@ export default function ClientesClient({
     })
   }
 
+  const KANBAN_COLUMNS = [
+    "Cliente criado",
+    "Contrato pendente",
+    "Contrato ativo",
+    "A vencer",
+    "Vencido",
+    "Contrato cancelado"
+  ];
+
+  const columnsData = useMemo(() => {
+    const cols = {} as Record<string, ClientRow[]>;
+    for (const col of KANBAN_COLUMNS) cols[col] = [];
+    
+    filteredRows.forEach(row => {
+      if (cols[row.clientStatusLabel]) {
+         cols[row.clientStatusLabel].push(row);
+      } else {
+         if (!cols['Outros']) cols['Outros'] = [];
+         cols['Outros'].push(row);
+      }
+    });
+    return cols;
+  }, [filteredRows]);
+
+  const onDragEnd = (result: DropResult) => {
+    const { destination, source, draggableId } = result;
+    if (!destination) return;
+    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+
+    const newRows = Array.from(localRows);
+    const draggedRowIndex = newRows.findIndex((r) => r.id === draggableId);
+    if (draggedRowIndex === -1) return;
+
+    const [draggedRow] = newRows.splice(draggedRowIndex, 1);
+    draggedRow.clientStatusLabel = destination.droppableId;
+    
+    newRows.splice(draggedRowIndex, 0, draggedRow);
+    setLocalRows(newRows);
+    
+    toast.success(`Status alterado para ${destination.droppableId}`);
+  };
+
   return (
     <div style={{ display: 'grid', gap: '20px' }}>
       {/* Header */}
@@ -669,6 +839,7 @@ export default function ClientesClient({
             {[
               { label: `${stats.total} total`, color: '#7dd3fc' },
               { label: `${stats.active} ativos`, color: '#86efac' },
+              stats.prospecting > 0 ? { label: `${stats.prospecting} prospecção`, color: '#99f6e4' } : null,
               stats.expiring > 0 ? { label: `${stats.expiring} a vencer`, color: '#facc15' } : null,
               stats.withoutPdf > 0 ? { label: `${stats.withoutPdf} sem PDF`, color: '#fca5a5' } : null,
             ].filter(Boolean).map((chip) => (
@@ -734,150 +905,136 @@ export default function ClientesClient({
           </div>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: '1180px', display: 'grid', gap: '10px' }}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(220px, 1.3fr) 170px 180px 170px 170px 140px 160px',
-                gap: '12px',
-                padding: '0 16px',
-                color: '#94a3b8',
-                fontSize: '0.7rem',
-                fontWeight: 800,
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-              }}
-            >
-            <span>Cliente</span>
-            <span>Fase</span>
-            <span>Consultor</span>
-            <span>Produto</span>
-            <span>Validade</span>
-              <span>Documento</span>
-              <span>Acoes</span>
-            </div>
-
-            {filteredRows.length ? (
-              filteredRows.map((row) => {
-                const isSelected = selectedRow?.id === row.id
-                const tone = getTone(row.clientStatusLabel)
-                return (
-                  <button
-                    key={row.id}
-                    type="button"
-                    onClick={() => setSelectedId(row.id)}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      display: 'grid',
-                      gridTemplateColumns: 'minmax(220px, 1.3fr) 170px 180px 170px 170px 140px 160px',
-                      gap: '12px',
-                      alignItems: 'center',
-                      padding: '16px',
-                      borderRadius: '18px',
-                      border: isSelected ? '1px solid rgba(56, 189, 248, 0.42)' : '1px solid rgba(255,255,255,0.06)',
-                      background: isSelected ? 'rgba(56, 189, 248, 0.08)' : 'rgba(255,255,255,0.03)',
-                      color: 'inherit',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <div style={{ display: 'grid', gap: '4px', minWidth: 0 }}>
-                      <div style={{ color: '#f8fafc', fontWeight: 900, fontSize: '0.94rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {row.name}
-                      </div>
-                      <div style={{ color: '#94a3b8', fontSize: '0.76rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {row.company || 'Sem empresa'} · {row.sourceLabel}
-                      </div>
+        <DragDropContext onDragEnd={onDragEnd}>
+          <div style={{ display: 'flex', gap: '16px', overflowX: 'auto', paddingBottom: '16px' }}>
+            {KANBAN_COLUMNS.concat(columnsData['Outros'] ? ['Outros'] : []).map(col => (
+              <div key={col} style={{ minWidth: '300px', maxWidth: '300px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '12px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.08)'
+                }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#e2e8f0' }}>{col}</span>
+                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '99px' }}>
+                    {columnsData[col]?.length || 0}
+                  </span>
+                </div>
+                
+                <Droppable droppableId={col}>
+                  {(provided: any, snapshot: any) => (
+                    <div
+                      {...provided.droppableProps}
+                      ref={provided.innerRef}
+                      style={{
+                        minHeight: '100px',
+                        background: snapshot.isDraggingOver ? 'rgba(255,255,255,0.05)' : 'transparent',
+                        borderRadius: '12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                        transition: 'background 0.2s ease'
+                      }}
+                    >
+                      {columnsData[col]?.length > 50 && (
+                        <div style={{ fontSize: '0.65rem', color: '#f59e0b', textAlign: 'center', marginBottom: '8px', padding: '4px', background: 'rgba(245,158,11,0.1)', borderRadius: '4px' }}>
+                          Mostrando 50 de {columnsData[col].length}. Use a busca.
+                        </div>
+                      )}
+                      {columnsData[col]?.slice(0, 50).map((row, index) => {
+                        const tone = getTone(row.clientStatusLabel);
+                        const isSelected = selectedRow?.id === row.id;
+                        return (
+                          <Draggable key={row.id} draggableId={row.id} index={index}>
+                            {(provided: any, snapshot: any) => (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                {...provided.dragHandleProps}
+                                onClick={() => setSelectedId(row.clientRecordId || row.leadId || row.id)}
+                                style={{
+                                  ...provided.draggableProps.style,
+                                  background: isSelected ? 'rgba(56, 189, 248, 0.08)' : 'rgba(30, 41, 59, 0.7)',
+                                  border: isSelected ? '1px solid rgba(56, 189, 248, 0.42)' : '1px solid rgba(255,255,255,0.08)',
+                                  borderRadius: '12px',
+                                  padding: '14px',
+                                  display: 'grid',
+                                  gap: '8px',
+                                  cursor: 'grab',
+                                  opacity: snapshot.isDragging ? 0.8 : 1,
+                                  boxShadow: snapshot.isDragging ? '0 10px 25px rgba(0,0,0,0.5)' : 'none',
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                  <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.85rem' }}>{row.name}</div>
+                                  <span
+                                    style={{
+                                      padding: '3px 6px', borderRadius: '4px',
+                                      color: tone.color, background: tone.background, border: `1px solid ${tone.border}`,
+                                      fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase'
+                                    }}
+                                  >
+                                    {row.clientStatusLabel}
+                                  </span>
+                                </div>
+                                <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>{row.company || 'Sem empresa'}</div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
+                                  <div>
+                                    <div style={{ color: '#64748b', fontSize: '0.65rem', textTransform: 'uppercase' }}>Consultor</div>
+                                    <div style={{ color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 600 }}>{row.consultant}</div>
+                                  </div>
+                                  <div>
+                                    <div style={{ color: '#64748b', fontSize: '0.65rem', textTransform: 'uppercase' }}>Produto</div>
+                                    <div style={{ color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 600 }}>{row.product}</div>
+                                  </div>
+                                </div>
+                                <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px', color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 700 }}>
+                                  <Clock3 size={12} color="#94a3b8" />
+                                  {formatCurrency(row.contractValue)}
+                                </div>
+                                {row.clientStatusLabel === 'A vencer' && (
+                                  <div style={{ marginTop: '6px', padding: '8px', borderRadius: '8px', background: 'rgba(250,204,21,0.08)', border: '1px solid rgba(250,204,21,0.2)', display: 'grid', gap: '4px' }}>
+                                    <div style={{ color: '#facc15', fontSize: '0.68rem', fontWeight: 800 }}>
+                                      {row.daysToExpire !== null ? `Vence em ${row.daysToExpire} dia${row.daysToExpire === 1 ? '' : 's'}` : 'Vencimento nao definido'}
+                                    </div>
+                                    {row.services.length > 0 ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                        {row.services.filter((service) => service.status === 'ativo').map((service) => (
+                                          <span key={service.id} style={{ padding: '2px 6px', borderRadius: '999px', background: 'rgba(192,132,252,0.12)', color: '#c084fc', fontSize: '0.62rem', fontWeight: 700 }}>
+                                            {service.nome}
+                                            {service.tipo_honorario === 'fixo'
+                                              ? (service.honorario_valor ? ` · ${formatCurrency(service.honorario_valor)}` : '')
+                                              : (service.honorario_percentual ? ` · ${service.honorario_percentual}%` : '')}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span style={{ color: '#94a3b8', fontSize: '0.68rem' }}>Nenhum trabalho cadastrado — abra o cliente e cadastre em &quot;Trabalhos&quot;.</span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </Draggable>
+                        )
+                      })}
+                      {provided.placeholder}
                     </div>
-
-                    <div>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          padding: '5px 9px',
-                          borderRadius: '999px',
-                          color: tone.color,
-                          background: tone.background,
-                          border: `1px solid ${tone.border}`,
-                          fontSize: '0.65rem',
-                          fontWeight: 900,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.08em',
-                        }}
-                      >
-                        {row.clientStatusLabel}
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'grid', gap: '4px', minWidth: 0 }}>
-                      <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: '0.84rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {row.consultant}
-                      </div>
-                      <div style={{ color: '#64748b', fontSize: '0.74rem' }}>{row.email || row.phone || row.whatsapp || 'Sem contato'}</div>
-                    </div>
-
-                    <div style={{ display: 'grid', gap: '4px', minWidth: 0 }}>
-                      <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: '0.84rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {row.product}
-                      </div>
-                      <div style={{ color: '#64748b', fontSize: '0.74rem' }}>{row.contractNumber || 'Contrato nao gerado'}</div>
-                    </div>
-
-                    <div style={{ display: 'grid', gap: '4px' }}>
-                      <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: '0.84rem' }}>{formatDate(row.contractValidUntil)}</div>
-                      <div style={{ color: '#64748b', fontSize: '0.74rem' }}>{row.contractSignedAt ? `Assinado ha ${formatAge(row.contractSignedAt)}` : 'Aguardando assinatura'}</div>
-                    </div>
-
-                    <div style={{ display: 'grid', gap: '4px' }}>
-                      <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: '0.84rem' }}>{row.pdfName || 'Pendente'}</div>
-                      <div style={{ color: '#64748b', fontSize: '0.74rem' }}>{row.contractStatusLabel}</div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '8px 10px',
-                          borderRadius: '999px',
-                          border: '1px solid rgba(255,255,255,0.08)',
-                          background: 'rgba(255,255,255,0.03)',
-                          color: '#e2e8f0',
-                          fontSize: '0.7rem',
-                          fontWeight: 800,
-                        }}
-                      >
-                        <Clock3 size={13} />
-                        {formatCurrency(row.contractValue)}
-                      </span>
-                    </div>
-                  </button>
-                )
-              })
-            ) : (
-              <div
-                style={{
-                  padding: '34px 18px',
-                  borderRadius: '20px',
-                  border: '1px dashed rgba(148, 163, 184, 0.18)',
-                  color: '#94a3b8',
-                  textAlign: 'center',
-                  display: 'grid',
-                  gap: '10px',
-                }}
-              >
-                <AlertTriangle size={22} color="var(--brand-primary)" style={{ margin: '0 auto' }} />
-                <div style={{ color: '#f8fafc', fontWeight: 800 }}>Nenhum cliente encontrado com os filtros atuais.</div>
-                <div style={{ fontSize: '0.82rem' }}>Tente ajustar a busca ou voltar ao status completo da lista.</div>
+                  )}
+                </Droppable>
               </div>
-            )}
+            ))}
           </div>
-        </div>
+        </DragDropContext>
       </section>
 
       {selectedRow ? (
+        <ClientDetailsPanel selectedRow={selectedRow} onClose={() => setSelectedId(null)} />
+      ) : null}
+      
+      {false ? (() => {
+        const selectedRow = {} as ClientRow;
+        const selectedPdfFile = {} as File;
+        return (
         <aside
           style={{
             position: 'fixed',
@@ -1278,7 +1435,7 @@ export default function ClientesClient({
                     ) : null}
                     {!selectedPdfPreview && selectedRow.pdfUrl ? (
                       <a
-                        href={selectedRow.pdfUrl}
+                        href={selectedRow.pdfUrl || undefined}
                         target="_blank"
                         rel="noreferrer"
                         style={{ color: '#7dd3fc', fontSize: '0.75rem', fontWeight: 700, textDecoration: 'none' }}
@@ -1533,12 +1690,34 @@ export default function ClientesClient({
                         onChange={(e) => setMeetingForm((f) => ({ ...f, title: e.target.value }))}
                       />
                     </div>
-                    <input
-                      className="input-field"
-                      placeholder="Link da gravacao (Google Meet, Zoom, Loom...)"
-                      value={meetingForm.recording_link}
-                      onChange={(e) => setMeetingForm((f) => ({ ...f, recording_link: e.target.value }))}
-                    />
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        className="input-field"
+                        placeholder="Link da gravacao (Google Meet, Zoom, Loom...)"
+                        value={meetingForm.recording_link}
+                        onChange={(e) => setMeetingForm((f) => ({ ...f, recording_link: e.target.value }))}
+                      />
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type="file"
+                          accept="audio/*,video/*"
+                          onChange={(e) => void handleUploadAudio(e)}
+                          style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', cursor: 'pointer', zIndex: 10 }}
+                          disabled={audioUploading}
+                        />
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          style={{ padding: '0 12px', height: '36px', fontSize: '0.78rem', gap: '6px', whiteSpace: 'nowrap' }}
+                          disabled={audioUploading}
+                        >
+                          {audioUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                          {audioUploading ? 'Transcrevendo...' : 'Upload Áudio'}
+                        </button>
+                      </div>
+                    </div>
+
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px' }}>
                       <input
                         className="input-field"
@@ -1750,16 +1929,18 @@ export default function ClientesClient({
             </div>
           </div>
         </aside>
-      ) : null}
+        );
+      })() : null}
 
       <ActionDialog
         open={createOpen}
         title="Novo cliente"
-        subtitle="Cadastre o cliente. Ele entrará automaticamente no CRM em 'Contato Inicial'."
-        onClose={() => setCreateOpen(false)}
+        subtitle="Informe o CNPJ para preencher os dados cadastrais automaticamente."
+        width="760px"
+        onClose={() => { setCreateOpen(false); setCnpjLookupData(null) }}
         footer={
           <>
-            <button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}>
+            <button type="button" className="btn-ghost" onClick={() => { setCreateOpen(false); setCnpjLookupData(null) }}>
               Cancelar
             </button>
             <button type="button" className="btn-primary" onClick={() => void handleCreateClient()} disabled={isPending}>
@@ -1768,95 +1949,108 @@ export default function ClientesClient({
           </>
         }
       >
-        <div style={{ display: 'grid', gap: '12px' }}>
-          <div className="agenda-form-grid">
-            <input
-              className="input-field"
-              placeholder="Nome do cliente"
-              value={createForm.name}
-              onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))}
-            />
-            <input
-              className="input-field"
-              placeholder="Empresa"
-              value={createForm.company}
-              onChange={(event) => setCreateForm((current) => ({ ...current, company: event.target.value }))}
-            />
-          </div>
-          <div className="agenda-form-grid">
-            <input
-              className="input-field"
-              placeholder="Email"
-              value={createForm.email}
-              onChange={(event) => setCreateForm((current) => ({ ...current, email: event.target.value }))}
-            />
-            <input
-              className="input-field"
-              placeholder="Documento"
-              value={createForm.document}
-              onChange={(event) => setCreateForm((current) => ({ ...current, document: event.target.value }))}
-            />
-          </div>
-          <div className="agenda-form-grid">
-            <input
-              className="input-field"
-              placeholder="Telefone"
-              value={createForm.phone}
-              onChange={(event) => setCreateForm((current) => ({ ...current, phone: event.target.value }))}
-            />
-            <input
-              className="input-field"
-              placeholder="WhatsApp"
-              value={createForm.whatsapp}
-              onChange={(event) => setCreateForm((current) => ({ ...current, whatsapp: event.target.value }))}
-            />
-          </div>
-          <div className="agenda-form-grid">
-            <select
-              className="input-field"
-              value={createForm.productId}
-              onChange={(event) => setCreateForm((current) => ({ ...current, productId: event.target.value }))}
-              style={{ background: 'var(--brand-surface)', color: '#e2e8f0' }}
-            >
-              <option value="">Produto foco</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name || 'Produto sem nome'}
-                </option>
-              ))}
-            </select>
-            <select
-              className="input-field"
-              value={createForm.consultantId}
-              onChange={(event) => setCreateForm((current) => ({ ...current, consultantId: event.target.value }))}
-              style={{ background: 'var(--brand-surface)', color: '#e2e8f0' }}
-            >
-              <option value="">Consultor responsavel</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.full_name || 'Sem nome'}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="agenda-form-grid">
-            <select
-              className="input-field"
-              value={createForm.crmStage}
-              onChange={(event) => setCreateForm((current) => ({ ...current, crmStage: event.target.value }))}
-              style={{ background: 'var(--brand-surface)', color: '#e2e8f0' }}
-            >
-              <option value="Contato Inicial">Contato Inicial (padrão)</option>
-              {crmStageOptions.map((stage) => (
-                <option key={stage} value={stage}>
-                  {stage}
-                </option>
-              ))}
-            </select>
-            <div className="badge badge-blue" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minHeight: '42px' }}>
-              Se escolher uma etapa, o cliente entra no CRM como lead vinculado.
+        <div className="clean-form">
+          <section className="clean-form-section">
+            <div className="clean-form-row clean-form-row-action">
+              <label>
+                CNPJ
+                <input
+                  className="input-field"
+                  value={createForm.document}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, document: maskCnpj(event.target.value) }))}
+                  inputMode="numeric"
+                />
+              </label>
+              <button type="button" className="btn-primary clean-form-action" onClick={() => void handleLookupCnpj()} disabled={cnpjLookupLoading}>
+                {cnpjLookupLoading ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Search size={15} aria-hidden="true" />}
+                Buscar dados
+              </button>
             </div>
-          </div>
+
+            {cnpjLookupData ? (
+              <div className="cnpj-result-card">
+                <div>
+                  <strong>{cnpjLookupData.razaoSocial}</strong>
+                  {cnpjLookupData.atividadePrincipal ? <small>{cnpjLookupData.atividadePrincipal}</small> : null}
+                </div>
+                <div className="cnpj-result-meta">
+                  <span>{cnpjLookupData.situacao || 'Situacao nao informada'}</span>
+                  {cnpjLookupData.municipio && cnpjLookupData.uf ? <span>{cnpjLookupData.municipio}/{cnpjLookupData.uf}</span> : null}
+                  <span>Fonte: {cnpjLookupData.origem}</span>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="clean-form-section">
+            <div className="clean-form-row clean-form-stage-row">
+              <label>
+                Nome no CRM
+                <input className="input-field" value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} />
+              </label>
+              <label>
+                Razao social
+                <input className="input-field" value={createForm.company} onChange={(event) => setCreateForm((current) => ({ ...current, company: event.target.value }))} />
+              </label>
+            </div>
+            <div className="clean-form-row">
+              <label>
+                E-mail
+                <input className="input-field" value={createForm.email} onChange={(event) => setCreateForm((current) => ({ ...current, email: event.target.value }))} />
+              </label>
+              <label>
+                Telefone
+                <input className="input-field" value={createForm.phone} onChange={(event) => setCreateForm((current) => ({ ...current, phone: event.target.value }))} />
+              </label>
+            </div>
+            <div className="clean-form-row">
+              <label>
+                WhatsApp
+                <input className="input-field" value={createForm.whatsapp} onChange={(event) => setCreateForm((current) => ({ ...current, whatsapp: event.target.value }))} />
+              </label>
+              <label>
+                Produto foco
+                <select className="input-field" value={createForm.productId} onChange={(event) => setCreateForm((current) => ({ ...current, productId: event.target.value }))} style={{ background: 'var(--brand-surface)', color: '#e2e8f0' }}>
+                  <option value="">Selecione</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>{product.name || 'Produto sem nome'}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="clean-form-row">
+              <label>
+                Consultor
+                <select className="input-field" value={createForm.consultantId} onChange={(event) => setCreateForm((current) => ({ ...current, consultantId: event.target.value }))} style={{ background: 'var(--brand-surface)', color: '#e2e8f0' }}>
+                  <option value="">Selecione</option>
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>{profile.full_name || 'Sem nome'}</option>
+                  ))}
+                </select>
+              </label>
+              <fieldset className="clean-stage-field">
+                <legend>Etapa inicial</legend>
+                <div className="stage-choice-grid">
+                  {crmStageOptions.map((stage) => {
+                    const active = createForm.crmStage === stage
+                    const color = CRM_STAGE_COLORS[stage] || 'var(--brand-muted)'
+                    return (
+                      <button
+                        key={stage}
+                        type="button"
+                        className={active ? 'stage-choice active' : 'stage-choice'}
+                        style={{ '--stage-color': color } as CSSProperties}
+                        onClick={() => setCreateForm((current) => ({ ...current, crmStage: stage }))}
+                      >
+                        <span aria-hidden="true" />
+                        {CRM_STAGE_LABELS[stage] || stage}
+                      </button>
+                    )
+                  })}
+                </div>
+              </fieldset>
+            </div>
+          </section>
         </div>
       </ActionDialog>
     </div>

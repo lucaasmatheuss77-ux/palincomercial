@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { listClienteOptions } from '@/app/actions/clientes'
 import PipelineBoard, { LeadType, Stage } from './pipeline-board'
 export const dynamic = 'force-dynamic'
 
@@ -75,6 +76,7 @@ type PipelinePageSearchParams = {
   lead?: string | string[]
 }
 
+
 export default async function PipelinePage({
   searchParams,
 }: {
@@ -87,22 +89,23 @@ export default async function PipelinePage({
 
   const supabase = await createClient()
 
-  const [{ data: leadsData }, { data: productsData }, { data: profilesData }, aiResult, contractsResult, clientsResult] = await Promise.all([
+  const [{ data: leadsData }, { data: productsData }, { data: profilesData }, aiResult, historyResult, contractsResult, clientsResult] = await Promise.all([
     supabase
       .from('leads')
       .select(`
-        id, name, company, stage, estimated_value, created_at, notes,
+        id, name, company_name, stage, expected_value, created_at, notas,
         phone, whatsapp, email,
-        client_id,
         product_id, consultant_id,
         product:products(id, name),
         consultant:profiles!consultant_id(id, full_name)
       `)
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false })
+      .limit(10000),
     supabase.from('products').select('id, name').order('name'),
     supabase.from('profiles').select('id, full_name').order('full_name'),
     supabase.from('ai_qualifications').select('lead_id, status, score, source, summary, updated_at'),
-    supabase.from('contracts').select('id, lead_id, client_id, contract_number, status, value, signed_at, notes, start_at, end_at, pdf_file_name, created_at, updated_at'),
+    supabase.from('lead_intelligence_history').select('lead_id, report_json, created_at').order('created_at', { ascending: false }),
+    supabase.from('contracts').select('id, lead_id, client_id, contract_number, status, value, signed_at, notes, start_date, end_date, pdf_file_name, created_at, updated_at'),
     supabase.from('clientes').select('id, origin_lead_id, status_cliente, active_contract_id'),
   ])
 
@@ -114,6 +117,18 @@ export default async function PipelinePage({
     summary: string | null
     updated_at: string | null
   }>
+
+  const historyRecords = ((historyResult.error ? [] : historyResult.data) || []) as Array<{
+    lead_id: string
+    report_json: any
+    created_at: string | null
+  }>
+  const latestHistoryByLead = new Map<string, any>()
+  for (const record of historyRecords) {
+    if (!latestHistoryByLead.has(record.lead_id) && record.report_json) {
+      latestHistoryByLead.set(record.lead_id, record.report_json)
+    }
+  }
 
   const { data: meetingRowsRaw } = await supabase
     .from('meetings')
@@ -169,8 +184,8 @@ export default async function PipelinePage({
     value: number | string | null
     signed_at: string | null
     notes: string | null
-    start_at: string | null
-    end_at: string | null
+    start_date: string | null
+    end_date: string | null
     pdf_file_name: string | null
     created_at: string | null
     updated_at: string | null
@@ -273,8 +288,8 @@ export default async function PipelinePage({
       }
     }
 
-    const baseDate = contract.start_at || readNoteTag(contract.notes, 'CONTRACT_START') || contract.signed_at || contract.created_at || null
-    const contractValidUntil = contract.end_at || readNoteTag(contract.notes, 'VALID_UNTIL') || addMonths(baseDate, 12)
+    const baseDate = contract.start_date || readNoteTag(contract.notes, 'CONTRACT_START') || contract.signed_at || contract.created_at || null
+    const contractValidUntil = contract.end_date || readNoteTag(contract.notes, 'VALID_UNTIL') || addMonths(baseDate, 12)
     const daysToExpire = contractValidUntil
       ? Math.floor((new Date(contractValidUntil).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
       : null
@@ -326,7 +341,8 @@ export default async function PipelinePage({
     Apresentacao: 'Apresentacao',
     Diagnostico: 'Apresentacao',
     Proposta: 'Proposta',
-    Negociacao: 'Negociacao',
+    Negociacao: 'Proposta',
+    Negociação: 'Proposta',
     Fechado: 'Fechado',
     Perdido: 'Perdido',
   }
@@ -334,19 +350,18 @@ export default async function PipelinePage({
   type SupabaseLeadRow = {
     id: string
     name: string
-    company: string | null
-    estimated_value: number | string | null
+    company_name: string | null
+    expected_value: number | string | null
     created_at: string
     phone: string | null
     whatsapp: string | null
     email: string | null
-    notes: string | null
+    notas: string | null
     product_id: string | null
     consultant_id: string | null
     stage: string
     product?: Array<{ name: string | null }>
     consultant?: Array<{ full_name: string | null }>
-    client_id: string | null
   }
 
   type AiQualificationRow = {
@@ -372,30 +387,32 @@ export default async function PipelinePage({
     const ai = aiByLead.get(lead.id) as AiQualificationRow | undefined
     const aiUpdatedAt = ai?.updated_at || null
     const aiFreshnessMinutes = aiUpdatedAt ? Math.max(0, Math.floor((Date.now() - new Date(aiUpdatedAt).getTime()) / (1000 * 60))) : null
-    const client = (lead.client_id ? clientById.get(lead.client_id) : null) || clientByLead.get(lead.id) || null
-    const clientId = lead.client_id || client?.id || null
+    const client = clientByLead.get(lead.id) || null
+    const clientId = client?.id || null
     const contract = contractByLead.get(lead.id) || (clientId ? contractByClient.get(clientId) : undefined)
     const contractInfo = classifyClientStatus(contract, client?.status_cliente)
 
     return {
       id: lead.id,
       name: lead.name,
-      company: lead.company || '',
+      company: lead.company_name || '',
       product: Array.isArray(lead.product) ? lead.product[0]?.name || 'Geral' : 'Geral',
       product_id: lead.product_id || '',
       consultant: Array.isArray(lead.consultant) ? lead.consultant[0]?.full_name?.split(' ')[0] || 'Time Palin' : 'Time Palin',
       consultant_id: lead.consultant_id || '',
-      value: Number(lead.estimated_value) || 0,
+      value: Number(lead.expected_value) || 0,
       days: Math.max(0, Math.floor((Date.now() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24))),
       stage: stageMap[lead.stage] || 'Contato Inicial',
       phone: lead.phone || '',
       whatsapp: lead.whatsapp || '',
       email: lead.email || '',
-      notes: lead.notes || null,
+      notes: lead.notas || null,
       ai_status: ai?.status || '',
       ai_score: Number(ai?.score || 0),
       ai_source: ai?.source || '',
       ai_summary: ai?.summary || '',
+      ai_warning_text: latestHistoryByLead.get(lead.id)?.alerta_vermelho_texto || (latestHistoryByLead.get(lead.id)?.alerta_vermelho ? "Atenção Requerida" : null),
+      ai_recommended_action: latestHistoryByLead.get(lead.id)?.acoes_recomendadas ? JSON.stringify(latestHistoryByLead.get(lead.id)?.acoes_recomendadas) : null,
       client_id: clientId,
       ai_updated_at: aiUpdatedAt,
       ai_freshness_minutes: aiFreshnessMinutes,
@@ -427,12 +444,14 @@ export default async function PipelinePage({
 
   const products = (productsData || []).map((p: ProductRow) => ({ id: p.id, name: p.name }))
   const consultants = (profilesData || []).map((p: ProfileRow) => ({ id: p.id, name: p.full_name }))
+  const clientes = await listClienteOptions()
 
   return (
     <PipelineBoard
       initialLeads={mappedLeads}
       products={products}
       consultants={consultants}
+      clientes={clientes}
       leadTimelines={timelinesMapped}
       initialSelectedLeadId={selectedLeadId}
       latestAiFreshnessMinutes={latestAiFreshnessMinutes}

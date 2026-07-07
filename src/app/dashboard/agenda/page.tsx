@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { listClienteOptions } from '@/app/actions/clientes'
 import AgendaManager from './agenda-manager'
 import type { AgendaLeadOption, AgendaLogisticsItem, AgendaMeeting, AgendaProfile, AgendaTask } from './agenda-types'
 
@@ -74,7 +75,7 @@ export default async function AgendaPage() {
     { data: logisticsData },
   ] = await Promise.all([
     supabase.from('profiles').select('id, full_name').order('full_name'),
-    supabase.from('leads').select('id, name, company, client_id').order('created_at', { ascending: false }),
+    supabase.from('leads').select('id, name, company, client_id').order('created_at', { ascending: false }).limit(10000),
     supabase.from('clientes').select('id, name, company_name').order('updated_at', { ascending: false }),
     supabase.from('meetings').select('id, title, scheduled_for, ends_at, location, meeting_type, status, objective, notes, lead_id, client_id, lead_name, company_name, next_step, next_contact_at, owner_profile_id, owner_name, requires_logistics').order('scheduled_for', { ascending: true }),
     supabase.from('meeting_tasks').select('id, meeting_id, title, due_at, priority, status, owner_profile_id, owner_name').order('due_at', { ascending: true }),
@@ -138,10 +139,11 @@ export default async function AgendaPage() {
   }))
 
   const fallbackProfiles: AgendaProfile[] = [{ id: 'fallback-1', full_name: 'Gestor' }]
+  const clientes = await listClienteOptions()
 
   return (
     <AgendaManager
-      leads={leads}
+      clientes={clientes}
       logisticsItems={logisticsItems}
       meetings={meetings}
       profiles={profiles.length > 0 ? profiles : fallbackProfiles}

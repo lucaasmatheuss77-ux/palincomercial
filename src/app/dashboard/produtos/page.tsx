@@ -1,8 +1,18 @@
-import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import ProdutosClient from './produtos-client'
 
 export const dynamic = 'force-dynamic'
+
+type ProductRow = {
+  id: string
+  name: string
+  slug: string | null
+  description: string | null
+  category: string | null
+  active: boolean | null
+  emoji?: string | null
+  color?: string | null
+}
 
 export default async function ProdutosPage() {
   const adminSupabase = createSupabaseClient(
@@ -10,30 +20,31 @@ export default async function ProdutosPage() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  const { data: products } = await adminSupabase
+  const fullResult = await adminSupabase
     .from('products')
-    .select('id, name, slug, description, category, active')
-    .eq('active', true)
+    .select('id, name, slug, description, category, active, emoji, color')
     .order('name')
 
-  const mapped = ((products || []) as {
-    id: string
-    name: string
-    slug: string
-    description: string | null
-    category: string | null
-    active: boolean
-    emoji?: string | null
-    color?: string | null
-  }[]).map((p) => ({
-    id: p.id,
-    name: p.name,
-    slug: p.slug,
-    emoji: p.emoji || '📦',
-    color: p.color || '#0f4c81',
-    description: p.description || '',
-    category: p.category || '',
-    active: p.active,
+  let products = fullResult.data as ProductRow[] | null
+
+  if (fullResult.error && /emoji|color/i.test(fullResult.error.message)) {
+    const fallbackResult = await adminSupabase
+      .from('products')
+      .select('id, name, slug, description, category, active')
+      .order('name')
+
+    products = fallbackResult.data as ProductRow[] | null
+  }
+
+  const mapped = (products || []).map((product) => ({
+    id: product.id,
+    name: product.name,
+    slug: product.slug || '',
+    emoji: product.emoji || '📦',
+    color: product.color || '#0f4c81',
+    description: product.description || '',
+    category: product.category || '',
+    active: product.active ?? true,
   }))
 
   return <ProdutosClient initialProducts={mapped} />

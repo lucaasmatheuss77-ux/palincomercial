@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { listClienteOptions } from '@/app/actions/clientes'
 import MobileHubClient from '../dashboard/mobile-crm/mobile-client'
 import { redirect } from 'next/navigation'
 
@@ -17,8 +18,9 @@ export default async function PocketCRMPage() {
   const [leadsRes, agendaRes, meetingsTodayRes, overdueRes, profileRes] = await Promise.allSettled([
     supabase
       .from('leads')
-      .select('id, name, stage, whatsapp, estimated_value, created_at, ai_score, cnpj, segmento_especifico, company')
-      .order('updated_at', { ascending: false }),
+      .select('id, name, stage, whatsapp, expected_value, created_at, ai_score, cnpj, segmento_especifico, company')
+      .order('updated_at', { ascending: false })
+      .limit(10000),
 
     supabase
       .from('meetings')
@@ -77,12 +79,14 @@ export default async function PocketCRMPage() {
 
   const consultantName = profileData?.full_name || currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'Consultor'
   const consultantRole = profileData?.role || 'Consultor'
+  const clientes = await listClienteOptions()
 
   return (
     <main style={{ minHeight: '100dvh', background: '#010409' }}>
       <MobileHubClient
         user={{ ...currentUser, user_metadata: { full_name: consultantName }, role: consultantRole }}
         leads={leads}
+        clientes={clientes}
         agenda={agenda}
         stats={stats}
       />

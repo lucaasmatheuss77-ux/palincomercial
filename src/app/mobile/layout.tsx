@@ -16,7 +16,7 @@ export const viewport: Viewport = {
 
 export default function MobileLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="mobile-environment min-h-screen bg-brand-darker overflow-x-hidden">
+    <div className="mobile-environment min-h-screen overflow-x-hidden" style={{ background: 'var(--brand-darker)' }}>
       {children}
     </div>
   )

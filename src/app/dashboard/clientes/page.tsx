@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { listClientServicesByClients } from '@/app/actions/client-services'
 import ClientesClient, { type ClientRow } from './clientes-client'
 
 export const dynamic = 'force-dynamic'
@@ -13,8 +14,8 @@ type ClientRecord = {
   phone: string | null
   whatsapp: string | null
   status_cliente: string | null
-  consultor_responsavel_id: string | null
-  produto_foco_id: string | null
+  consultant_id: string | null
+  product_id: string | null
   active_contract_id: string | null
   created_at: string | null
   updated_at: string | null
@@ -40,8 +41,8 @@ type ContractRecord = {
   contract_number: string | null
   status: string | null
   value: number | string | null
-  start_at: string | null
-  end_at: string | null
+  start_date: string | null
+  end_date: string | null
   signed_at: string | null
   notes: string | null
   pdf_bucket: string | null
@@ -259,11 +260,12 @@ function getClientStatus(contract?: ContractRecord | null, clientStatus?: string
       client_status_label: clientStatus === 'aguardando_contrato' ? 'Contrato pendente' : 'Cliente criado',
       contract_status_label: 'Sem contrato',
       contract_valid_until: null as string | null,
+      days_to_expire: null as number | null,
     }
   }
 
-  const baseDate = contract.start_at || readNoteTag(contract.notes, 'CONTRACT_START') || contract.signed_at || contract.created_at || null
-  const contractValidUntil = contract.end_at || readNoteTag(contract.notes, 'VALID_UNTIL') || addMonths(baseDate, 12)
+  const baseDate = contract.start_date || readNoteTag(contract.notes, 'CONTRACT_START') || contract.signed_at || contract.created_at || null
+  const contractValidUntil = contract.end_date || readNoteTag(contract.notes, 'VALID_UNTIL') || addMonths(baseDate, 12)
   const daysToExpire = contractValidUntil
     ? Math.floor((new Date(contractValidUntil).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
     : null
@@ -273,6 +275,7 @@ function getClientStatus(contract?: ContractRecord | null, clientStatus?: string
       client_status_label: 'Contrato cancelado',
       contract_status_label: 'Cancelado',
       contract_valid_until: contractValidUntil,
+      days_to_expire: daysToExpire,
     }
   }
 
@@ -281,14 +284,16 @@ function getClientStatus(contract?: ContractRecord | null, clientStatus?: string
       client_status_label: 'Vencido',
       contract_status_label: 'Vencido',
       contract_valid_until: contractValidUntil,
+      days_to_expire: daysToExpire,
     }
   }
 
   if (contract.status === 'ativo' || contract.signed_at) {
     return {
-      client_status_label: daysToExpire !== null && daysToExpire <= 30 ? 'A vencer' : 'Contrato ativo',
-      contract_status_label: daysToExpire !== null && daysToExpire <= 30 ? 'A vencer' : 'Ativo',
+      client_status_label: daysToExpire !== null && daysToExpire <= 365 ? 'A vencer' : 'Contrato ativo',
+      contract_status_label: daysToExpire !== null && daysToExpire <= 365 ? 'A vencer' : 'Ativo',
       contract_valid_until: contractValidUntil,
+      days_to_expire: daysToExpire,
     }
   }
 
@@ -296,6 +301,7 @@ function getClientStatus(contract?: ContractRecord | null, clientStatus?: string
     client_status_label: 'Contrato pendente',
     contract_status_label: 'Pendente',
     contract_valid_until: contractValidUntil,
+    days_to_expire: daysToExpire,
   }
 }
 
@@ -318,9 +324,9 @@ export default async function ClientesPage({
   try {
     const queryResults = await Promise.allSettled([
       supabase.from('clientes').select('*').order('updated_at', { ascending: false }),
-      supabase.from('leads').select('id, name, company, email, phone, whatsapp, created_at'),
+      supabase.from('leads').select('id, name, email, phone, whatsapp, created_at').limit(10000),
       supabase.from('contracts').select(
-        'id, deal_id, lead_id, client_id, product_id, consultant_id, contract_number, status, value, start_at, end_at, signed_at, notes, pdf_bucket, pdf_path, pdf_file_name, pdf_mime_type, pdf_uploaded_at, cancellation_reason, created_at, updated_at'
+        'id, deal_id, lead_id, client_id, product_id, consultant_id, contract_number, status, value, start_date, end_date, signed_at, notes, pdf_bucket, pdf_path, pdf_file_name, pdf_mime_type, pdf_uploaded_at, cancellation_reason, created_at, updated_at'
       ),
       supabase.from('deals').select('id, lead_id'),
       supabase.from('contract_documents').select('id, contract_id, client_id, kind, bucket, path, file_name, mime_type, file_size, version, uploaded_at'),
@@ -343,6 +349,13 @@ export default async function ClientesPage({
     ] = queryResults
 
     const clients = (clientsResult.status === 'fulfilled' ? (clientsResult.value.data ?? []) : []) as ClientRecord[]
+    const clientServices = await listClientServicesByClients(clients.map((client) => client.id))
+    const servicesByClient = new Map<string, typeof clientServices>()
+    for (const service of clientServices) {
+      const list = servicesByClient.get(service.client_id) || []
+      list.push(service)
+      servicesByClient.set(service.client_id, list)
+    }
     const leads = (leadsResult.status === 'fulfilled' ? (leadsResult.value.data ?? []) : []) as LeadRecord[]
     const contracts = (contractsResult.status === 'fulfilled' ? (contractsResult.value.data ?? []) : []) as ContractRecord[]
     const deals = (dealsResult.status === 'fulfilled' ? (dealsResult.value.data ?? []) : []) as DealRecord[]
@@ -458,12 +471,12 @@ export default async function ClientesPage({
       : []
     const latestDocument = contractDocuments[0]
     const status = getClientStatus(contract, client.status_cliente)
-    const product = contract?.product_id ? productById.get(contract.product_id) || 'Geral' : client.produto_foco_id ? productById.get(client.produto_foco_id) || 'Geral' : 'Geral'
+    const product = contract?.product_id ? productById.get(contract.product_id) || 'Geral' : client.product_id ? productById.get(client.product_id) || 'Geral' : 'Geral'
     const consultant =
       contract?.consultant_id
         ? profileById.get(contract.consultant_id) || 'Sem consultor'
-        : client.consultor_responsavel_id
-          ? profileById.get(client.consultor_responsavel_id) || 'Sem consultor'
+        : client.consultant_id
+          ? profileById.get(client.consultant_id) || 'Sem consultor'
           : 'Sem consultor'
     const pdfBucket = contract?.pdf_bucket || latestDocument?.bucket || null
     const pdfPath = contract?.pdf_path || latestDocument?.path || readNoteTag(contract?.notes || null, 'PDF_PATH') || null
@@ -511,7 +524,7 @@ export default async function ClientesPage({
       contractValue: Number(contract?.value ?? 0) || 0,
       contractSignedAt: contract?.signed_at || null,
       contractValidUntil: status.contract_valid_until,
-      contractStartAt: contract?.start_at || readNoteTag(contract?.notes || null, 'CONTRACT_START') || contract?.created_at || null,
+      contractStartAt: contract?.start_date || readNoteTag(contract?.notes || null, 'CONTRACT_START') || contract?.created_at || null,
       contractUpdatedAt: contract?.updated_at || null,
       contractNotes: contract?.notes || null,
       pdfName,
@@ -526,12 +539,24 @@ export default async function ClientesPage({
       commercialHistory: leadHistory,
       createdAt: client.created_at || lead?.created_at || null,
       updatedAt: client.updated_at || contract?.updated_at || null,
+      services: (servicesByClient.get(client.id) || []).map((service) => ({
+        id: service.id,
+        nome: service.nome,
+        status: service.status,
+        tipo_honorario: service.tipo_honorario,
+        honorario_valor: service.honorario_valor,
+        honorario_percentual: service.honorario_percentual,
+        base_calculo: service.base_calculo,
+      })),
+      daysToExpire: status.days_to_expire,
     }
   })
 
+  const allRows = rows
+
   return (
     <ClientesClient
-      rows={rows}
+      rows={allRows}
       products={products}
       profiles={profiles}
       initialSelectedClientId={selectedClientId}

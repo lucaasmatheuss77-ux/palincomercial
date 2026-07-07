@@ -1,14 +1,24 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import type { CSSProperties, ElementType } from 'react'
 import {
-  TrendingUp, Zap, BarChart3, Activity, CalendarClock,
-  Sparkles, Flame, Search, X,
-  Target, Percent, Tv, AlertCircle, CheckCircle2
+  Activity,
+  AlertCircle,
+  ArrowRight,
+  BarChart3,
+  CalendarClock,
+  CheckCircle2,
+  Flame,
+  ShieldAlert,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Tv,
+  Users,
+  Zap,
 } from 'lucide-react'
-import { useRouter } from 'next/navigation'
-
-
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export type MomentumData = { today: number; week: number; month: number; meta: number }
 export type LastDealData = { leadName: string; consultantName: string; value: number; closedAt: string | null } | null
@@ -35,6 +45,7 @@ export type KPIData = {
   eventsRoi: number
   leadVelocity: number
   lossRate: number
+  lostDeals: number
 }
 
 export type PipelineData = { stage: string; count: number }[]
@@ -46,6 +57,7 @@ export type ContractsMonthlyData = { mes: string; contratos: number }[]
 export type ProductFocusData = {
   id: string
   name: string
+  category: string
   color: string
   participation: number
   contractsMeta: number
@@ -53,47 +65,120 @@ export type ProductFocusData = {
   pipelineData: PipelineData
   revenueData: MonthlyData
   recentActivity: ActivityData
+  staleLeads: { id: string; name: string; stage: string; days_stale: number }[]
 }
 
-function CompactStatCard({ icon: Icon, label, value, sub, tone = 'var(--brand-primary)' }: {
-  icon: React.ElementType; label: string; value: string; sub: string; tone?: string
+const STAGE_LABELS: Record<string, string> = {
+  'Contato Inicial': 'Contato Inicial',
+  Qualificacao: 'Qualificação',
+  Apresentacao: 'Apresentação',
+  Proposta: 'Proposta',
+  Fechado: 'Fechamento',
+}
+
+const STAGE_COLORS: Record<string, string> = {
+  'Contato Inicial': '#9ca3af',
+  Qualificacao: '#3b82f6',
+  Apresentacao: '#eab308',
+  Proposta: '#ef4444',
+  Fechado: '#3b82f6',
+}
+
+const CATEGORY_DEFINITIONS = [
+  {
+    key: 'tributario',
+    label: 'Tributário',
+    tone: '#eab308',
+    terms: ['tribut', 'icms', 'pis', 'cofins', 'irpj', 'csll', 'fiscal', 'credito', 'crédito', 'cat 83'],
+  },
+  {
+    key: 'educacional',
+    label: 'Educacional',
+    tone: '#38bdf8',
+    terms: ['educ', 'trein', 'curso', 'mentoria', 'workshop', 'palestra'],
+  },
+  {
+    key: 'saude-mental',
+    label: 'Integramente',
+    tone: '#c084fc',
+    terms: ['saude mental', 'saúde mental', 'psic', 'nr1', 'nr-1', 'bem-estar', 'bem estar'],
+  },
+  {
+    key: 'rural',
+    label: 'Rural',
+    tone: '#22c55e',
+    terms: ['rural', 'agro', 'agric', 'fazenda', 'campo', 'produtor', 'agronegocio', 'agronegócio'],
+  },
+  {
+    key: 'tecnologia',
+    label: 'Tecnologia',
+    tone: '#06b6d4',
+    terms: ['tech', 'tecnolog', 'software', 'sistema', 'automacao', 'automação', 'dados'],
+  },
+]
+
+function pct(value: number) {
+  return `${Number.isFinite(value) ? value.toFixed(1) : '0.0'}%`
+}
+
+function matchCategory(name: string, explicitCategory?: string | null) {
+  const normalized = `${explicitCategory || ''} ${name}`.toLowerCase()
+  return CATEGORY_DEFINITIONS.find((category) => category.terms.some((term) => normalized.includes(term))) || CATEGORY_DEFINITIONS[0]
+}
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone = 'var(--brand-primary)',
+}: {
+  icon: ElementType
+  label: string
+  value: string | number
+  detail: string
+  tone?: string
 }) {
   return (
-    <div className="glass-card" style={{
-      padding: '16px', minHeight: '85px',
-      display: 'flex', flexDirection: 'column', justifyContent: 'space-between'
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-        <div style={{
-          width: '32px', height: '32px', borderRadius: '8px', flexShrink: 0,
-          background: `${tone}14`,
-          border: `1px solid ${tone}1f`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }}>
-          <Icon size={16} color={tone} />
-        </div>
-        <div style={{ fontSize: '0.62rem', color: 'var(--brand-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          {label}
-        </div>
+    <div className="glass-card dash-stat-card">
+      <div className="dash-stat-top">
+        <span>{label}</span>
+        <Icon size={17} color={tone} aria-hidden="true" />
       </div>
-      <div>
-        <div style={{ fontSize: 'clamp(1.3rem, 1.8vw, 1.6rem)', fontWeight: 900, color: 'var(--brand-text)', letterSpacing: '-0.02em', lineHeight: 1 }}>
-          {value}
-        </div>
-        <div style={{ fontSize: '0.70rem', color: 'var(--brand-muted)', marginTop: '4px' }}>
-          {sub}
-        </div>
-      </div>
+      <strong style={{ color: tone }}>{value}</strong>
+      <small>{detail}</small>
     </div>
   )
 }
 
-const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
-
-
+function CommandMetric({
+  label,
+  value,
+  caption,
+  tone,
+}: {
+  label: string
+  value: string | number
+  caption: string
+  tone: string
+}) {
+  return (
+    <div className="dash-command-metric" style={{ borderColor: `${tone}36`, background: `${tone}0f` }}>
+      <span style={{ color: tone }}>{label}</span>
+      <strong>{value}</strong>
+      <small>{caption}</small>
+    </div>
+  )
+}
 
 export default function DashboardClient({
-  kpis, pipelineData, productData, momentumData, recentActivity, productFocusData, contractsMonthly
+  kpis,
+  pipelineData,
+  productData,
+  momentumData,
+  recentActivity,
+  productFocusData,
+  contractsMonthly,
 }: {
   kpis: KPIData
   pipelineData: PipelineData
@@ -105,658 +190,1101 @@ export default function DashboardClient({
   productFocusData: ProductFocusData[]
   contractsMonthly: ContractsMonthlyData
 }) {
-  const [mounted, setMounted] = useState(false)
   const [focusMode, setFocusMode] = useState<'geral' | string>('geral')
-  const [searchTerm, setSearchTerm] = useState('')
-  const [showResults, setShowResults] = useState(false)
-  const [isTvMode, setIsTvMode] = useState(false)
+  const [isTvMode, setIsTvMode] = useState(true)
   const router = useRouter()
-
-  useEffect(() => { setMounted(true) }, [])
-
-  useEffect(() => {
-    if (!isTvMode) return;
-    const ids = ['geral', ...productFocusData.map(p => p.id)];
-    const interval = setInterval(() => {
-      setFocusMode(prev => {
-        const currentIndex = ids.indexOf(prev);
-        const nextIndex = (currentIndex + 1) % ids.length;
-        return ids[nextIndex];
-      });
-    }, 12000); // Roda a cada 12 segundos
-    return () => clearInterval(interval);
-  }, [isTvMode, productFocusData]);
-
-  // Auto-refresh logic for TV Mode and general dashboard freshness
-  useEffect(() => {
-    const intervalTime = isTvMode ? 30000 : 180000 // 30s for TV, 3m for regular
-    const interval = setInterval(() => {
-      router.refresh()
-    }, intervalTime)
-    return () => clearInterval(interval)
-  }, [isTvMode, router])
+  const searchParams = useSearchParams()
+  const currentMonth = searchParams.get('month') || (new Date().getMonth() + 1).toString()
+  const currentYear = searchParams.get('year') || new Date().getFullYear().toString()
 
   const selectedProductFocus = productFocusData.find((item) => item.id === focusMode)
-  const isProductMode = Boolean(selectedProductFocus)
   const activeKpis = selectedProductFocus?.kpis || kpis
   const activePipelineData = selectedProductFocus?.pipelineData || pipelineData
   const activeRecentActivity = selectedProductFocus?.recentActivity || recentActivity
-  const colors = ['var(--brand-primary)', '#fcd34d', 'var(--brand-muted)', '#484f58']
-  const metaPercent = activeKpis.contractsMeta > 0 ? Math.round((activeKpis.contracts / activeKpis.contractsMeta) * 100) : 0
-  const remainingContracts = Math.max(activeKpis.contractsMeta - activeKpis.contracts, 0)
-  const missionStatus = metaPercent >= 100
-    ? 'Meta batida'
-    : metaPercent >= 70
-      ? 'Em rota'
-      : 'Pede reacao'
-  const executiveImmediateCopy = remainingContracts > 0
-    ? isProductMode
-      ? `Faltam ${remainingContracts} contratos para ${selectedProductFocus?.name}. Prioridade: converter o CRM quente deste produto.`
-      : `Faltam ${remainingContracts} contratos para a meta geral. Prioridade: virar em fechamento o que ja esta em Proposta e Negociacao.`
-    : isProductMode
-      ? `${selectedProductFocus?.name} ja bateu a meta. Agora vale proteger margem e manter recorrencia.`
-      : 'A meta geral ja foi batida. Agora o foco passa a ser previsibilidade e qualidade de receita.'
+  const activeStaleLeads = selectedProductFocus
+    ? selectedProductFocus.staleLeads
+    : productFocusData.flatMap((product) => product.staleLeads).filter((lead, index, array) => array.findIndex((item) => item.id === lead.id) === index)
 
-  const maxPipelineCount = Math.max(...activePipelineData.map(d => d.count), 1)
-  const pipelineColors = ['var(--brand-primary)', '#f59e0b', '#f97316', '#ef4444', '#14b8a6']
-  const filteredProducts = productData.filter((p) => p.name.toLowerCase() !== 'geral' && p.name !== 'Sem leads ativos')
-  const totalProductValue = filteredProducts.reduce((sum, item) => sum + Number(item.value || 0), 0)
-  const donutSegments = filteredProducts.length
-    ? filteredProducts.map((item, index) => {
-        const start = filteredProducts.slice(0, index).reduce((sum, current) => sum + Number(current.value || 0), 0)
-        const startPct = totalProductValue > 0 ? (start / totalProductValue) * 100 : 0
-        const endPct = totalProductValue > 0 ? ((start + Number(item.value || 0)) / totalProductValue) * 100 : 0
-        return `${item.color || colors[index % colors.length]} ${startPct}% ${endPct}%`
+  const maxPipelineCount = Math.max(...activePipelineData.map((item) => item.count), 1)
+  const leadingProduct = productData
+    .filter((item) => item.name.toLowerCase() !== 'geral' && item.name !== 'Sem leads ativos')
+    .sort((left, right) => right.value - left.value)[0]
+
+  const categoryBase = new Map(CATEGORY_DEFINITIONS.map((category) => [
+    category.key,
+    {
+      ...category,
+      activeLeads: 0,
+      contracts: 0,
+      proposals: 0,
+      stale: 0,
+      participation: 0,
+      services: [] as string[],
+    },
+  ]))
+
+  productFocusData.forEach((product) => {
+    const category = matchCategory(product.name, product.category)
+    const bucket = categoryBase.get(category.key)
+    if (!bucket) return
+    bucket.activeLeads += product.kpis.activeLeads
+    bucket.contracts += product.kpis.contracts
+    bucket.proposals += product.kpis.lateStageOpportunities
+    bucket.stale += product.staleLeads.length
+    bucket.participation += product.participation
+    if (!product.name.startsWith('>')) bucket.services.push(product.name)
+  })
+
+  const categoryGoals = Array.from(categoryBase.values()).map((category, index) => ({
+    ...category,
+    services: category.services.slice(0, 3),
+    order: index,
+  }))
+
+  const categoryAttention = categoryGoals
+    .map((category) => {
+      const pressure = category.proposals * 3 + category.stale * 2 + category.activeLeads
+      return {
+        ...category,
+        pressure,
+        message:
+          category.proposals > 0
+            ? `${category.proposals} proposta${category.proposals > 1 ? 's' : ''} para fechar agora`
+            : category.stale > 0
+              ? `${category.stale} lead${category.stale > 1 ? 's' : ''} parado${category.stale > 1 ? 's' : ''}`
+              : 'categoria sob controle',
+      }
+    })
+    .sort((left, right) => right.pressure - left.pressure)
+  const remainingContracts = Math.max(activeKpis.contractsMeta - activeKpis.contracts, 0)
+  const hottestCategory = categoryAttention[0]
+  const commandMode = activeStaleLeads.length > 0 ? 'resgatar' : activeKpis.lateStageOpportunities > 0 ? 'fechar' : 'prospectar'
+  const commandNow = commandMode === 'resgatar' ? 'Resgatar' : commandMode === 'fechar' ? 'Fechar' : 'Prospectar'
+  const commandCaption = commandMode === 'resgatar'
+    ? `${activeStaleLeads.length} cliente(s) em risco`
+    : commandMode === 'fechar'
+      ? `${activeKpis.lateStageOpportunities} proposta(s) abertas`
+      : 'criar novas oportunidades'
+  const currentPeriodDate = new Date(Number(currentYear), Number(currentMonth) - 1, 1)
+  const currentPeriodLabel = currentPeriodDate.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
+  const contractsHistoryTotal = contractsMonthly.reduce((sum, item) => sum + Number(item.contratos || 0), 0)
+  const today = new Date()
+  const daysInCurrentMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+  const elapsedMonthDays = today.getDate()
+  const remainingMonthDays = Math.max(daysInCurrentMonth - elapsedMonthDays + 1, 1)
+  const expectedByToday = momentumData.meta > 0
+    ? Math.ceil((momentumData.meta / daysInCurrentMonth) * elapsedMonthDays)
+    : 0
+  const remainingMonthContracts = Math.max(momentumData.meta - momentumData.month, 0)
+  const neededDailyPace = momentumData.meta > 0
+    ? Math.ceil(remainingMonthContracts / remainingMonthDays)
+    : 0
+  const goToMonth = (offset: number) => {
+    const date = new Date(Number(currentYear), Number(currentMonth) - 1 + offset, 1)
+    router.push(`?month=${date.getMonth() + 1}&year=${date.getFullYear()}`)
+  }
+
+  useEffect(() => {
+    if (!isTvMode) return
+    const ids = ['geral', ...productFocusData.map((product) => product.id)]
+    const interval = window.setInterval(() => {
+      setFocusMode((current) => {
+        const currentIndex = ids.indexOf(current)
+        return ids[(currentIndex + 1) % ids.length]
       })
-    : []
+    }, 12000)
+    return () => window.clearInterval(interval)
+  }, [isTvMode, productFocusData])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      router.refresh()
+    }, isTvMode ? 30000 : 180000)
+    return () => window.clearInterval(interval)
+  }, [isTvMode, router])
 
   return (
-    <div style={{ width: '100%', maxWidth: '1600px', margin: '0 auto', display: 'grid', gap: '16px' }}>
-
-      {/* LINHA 0 — Chips de foco */}
-      {/* LINHA 0 — Barra de Pesquisa de Produto + Filtro Ativo */}
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '8px' }}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: '400px' }}>
-          <Search size={16} color="var(--brand-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
-          <input 
-            type="text"
-            placeholder="Filtrar por nome do produto..."
-            className="dashboard-search-input"
-            value={searchTerm}
-            onFocus={() => setShowResults(true)}
-            onBlur={() => setTimeout(() => setShowResults(false), 200)}
-            onChange={(e) => {
-              setSearchTerm(e.target.value)
-              setShowResults(true)
-            }}
-            style={{
-              width: '100%',
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '10px',
-              padding: '10px 12px 10px 38px',
-              color: 'var(--brand-text)',
-              fontSize: '0.85rem',
-              outline: 'none',
-              transition: 'border-color 0.2s ease'
-            }}
-          />
-          
-          {showResults && searchTerm && (
-            <div className="glass-card" style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              right: 0,
-              zIndex: 100,
-              marginTop: '8px',
-              maxHeight: '300px',
-              overflowY: 'auto',
-              padding: '8px',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-              border: '1px solid rgba(251, 191, 36, 0.2)'
-            }}>
-              {productFocusData.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).length > 0 ? (
-                productFocusData
-                  .filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                  .map(product => (
-                    <button
-                      key={product.id}
-                      onClick={() => {
-                        setFocusMode(product.id)
-                        setSearchTerm('')
-                        setShowResults(false)
-                      }}
-                      className="search-result-item"
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        textAlign: 'left',
-                        borderRadius: '8px',
-                        background: focusMode === product.id ? 'rgba(251, 191, 36, 0.1)' : 'transparent',
-                        color: focusMode === product.id ? 'var(--brand-primary)' : '#c9d1d9',
-                        border: 'none',
-                        fontSize: '0.8rem',
-                        fontWeight: focusMode === product.id ? 800 : 500,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: product.color }} />
-                      {product.name}
-                    </button>
-                  ))
-              ) : (
-                <div style={{ padding: '12px', color: 'var(--brand-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
-                  Nenhum produto encontrado
-                </div>
-              )}
-            </div>
-          )}
+    <div className="dashboard-v3">
+      <section className="dash-command">
+        <div className="dash-command-copy">
+          <span className="dash-eyebrow">
+            <Sparkles size={14} aria-hidden="true" />
+            Painel de decisão comercial
+          </span>
+          <h1>O que precisamos fazer agora para vender mais e não perder cliente?</h1>
         </div>
-
-        {focusMode !== 'geral' && !isTvMode && (
-          <button
-            onClick={() => setFocusMode('geral')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              background: 'rgba(251, 191, 36, 0.1)',
-              color: 'var(--brand-primary)',
-              border: '1px solid rgba(251, 191, 36, 0.2)',
-              fontSize: '0.75rem',
-              fontWeight: 800,
-              cursor: 'pointer'
-            }}
-          >
-            Filtro Ativo: {selectedProductFocus?.name}
-            <X size={14} />
-          </button>
-        )}
-
         <button
-          onClick={() => setIsTvMode(!isTvMode)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 14px',
-            borderRadius: '8px',
-            background: isTvMode ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.04)',
-            color: isTvMode ? '#10b981' : 'var(--brand-muted)',
-            border: `1px solid ${isTvMode ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255, 255, 255, 0.08)'}`,
-            fontSize: '0.75rem',
-            fontWeight: 800,
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            marginLeft: 'auto'
-          }}
-          title="Alternar Modo TV (Rotação Automática)"
+          type="button"
+          className="dash-tv-toggle"
+          data-active={isTvMode}
+          onClick={() => setIsTvMode((current) => !current)}
+          aria-label={isTvMode ? 'Modo TV ligado' : 'Modo TV desligado'}
+          title={isTvMode ? 'TV ligada' : 'Modo TV'}
         >
-          <Tv size={15} />
-          {isTvMode ? 'Modo TV: ON' : 'Modo TV: OFF'}
+          <Tv size={16} aria-hidden="true" />
         </button>
-      </div>
+      </section>
 
-
-      {/* LINHA 1 — Hero (Centralizado e Maior) */}
-      <div style={{
-        background: 'radial-gradient(circle at 50% 50%, rgba(251,191,36,0.12), transparent 70%), rgba(22,27,34,0.98)',
-        border: '1px solid rgba(251,191,36,0.2)',
-        borderRadius: '16px',
-        padding: '32px 24px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        textAlign: 'center',
-        gap: '12px',
-        marginBottom: '2px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
-            {missionStatus === 'Pede reacao' ? (
-              <span
-                className="badge animate-pulse-glow"
-                style={{
-                  background: 'rgba(239, 68, 68, 0.25)',
-                  color: '#ef4444',
-                  border: '2px solid rgba(239, 68, 68, 0.5)',
-                  fontSize: '1rem',
-                  padding: '8px 24px',
-                  fontWeight: 950,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.1em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  boxShadow: '0 0 20px rgba(239, 68, 68, 0.3)'
-                }}
-              >
-                <AlertCircle size={18} strokeWidth={3} />
-                PRECISA DE REAÇÃO IMEDIATA
-              </span>
-            ) : (
-              <span
-                className="badge"
-                style={{
-                  background: metaPercent >= 100 
-                    ? 'rgba(16,185,129,0.18)' 
-                    : 'rgba(251,191,36,0.12)',
-                  color: metaPercent >= 100 
-                    ? '#10b981' 
-                    : '#fbbf24',
-                  border: `1px solid ${
-                    metaPercent >= 100 
-                      ? 'rgba(16,185,129,0.35)' 
-                      : 'rgba(251,191,36,0.3)'
-                  }`,
-                  fontSize: '0.85rem',
-                  padding: '6px 16px',
-                  fontWeight: 900,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                {metaPercent >= 100 ? <CheckCircle2 size={14} /> : <TrendingUp size={14} />}
-                {missionStatus}
-              </span>
-            )}
-        </div>
-
-        <div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--brand-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
-            CONTRATOS FECHADOS
-          </div>
-          <div style={{ fontSize: 'clamp(2.8rem, 4vw, 4rem)', fontWeight: 950, color: 'var(--brand-primary)', letterSpacing: '-0.04em', lineHeight: 1 }}>
-            {activeKpis.contracts}
-            <span style={{ fontSize: '1.4rem', color: 'var(--brand-muted)', fontWeight: 700, marginLeft: '8px' }}>
-              / {activeKpis.contractsMeta}
-            </span>
-          </div>
-        </div>
-
-        <div style={{ width: '100%', maxWidth: '400px', margin: '8px 0' }}>
-          <div className="progress-bar" style={{ height: '12px', background: 'rgba(255,255,255,0.06)' }}>
-            <div className="progress-fill" style={{ width: mounted ? `${Math.min(metaPercent, 100)}%` : '0%', minWidth: metaPercent > 0 ? '8px' : 0 }} />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '8px' }}>
-            <span style={{ fontSize: '0.78rem', color: 'var(--brand-primary)', fontWeight: 800 }}>{metaPercent}% da meta</span>
-            <span style={{ fontSize: '0.78rem', color: 'var(--brand-muted)' }}>Falta {remainingContracts} contratos</span>
-          </div>
-        </div>
-
-        <div style={{
-          fontSize: '0.85rem', color: 'var(--brand-muted)', marginTop: '8px',
-          maxWidth: '600px',
-          lineHeight: 1.5
-        }}>
-          {executiveImmediateCopy}
-        </div>
-      </div>
-
-      {/* LINHA 2 — Grid de KPIs Menores */}
-      <div className="dashboard-kpi-grid">
-        {/* 7 CompactStatCards */}
-        <CompactStatCard
-          icon={Target}
-          label="CRESC. LEADS"
-          value={`${activeKpis.leadVelocity > 0 ? '+' : ''}${activeKpis.leadVelocity.toFixed(1)}%`}
-          sub="Crescimento mensal"
-          tone={activeKpis.leadVelocity >= 0 ? "var(--brand-primary)" : "#ef4444"}
-        />
-        <CompactStatCard
-          icon={Percent}
-          label="TAXA DE PERDA"
-          value={`${activeKpis.lossRate.toFixed(1)}%`}
-          sub="Negócios perdidos"
-          tone="#ef4444"
-        />
-        <CompactStatCard
-          icon={Sparkles}
-          label="ROI DE EVENTOS"
-          value={currency.format(activeKpis.eventsRoi)}
-          sub={`${activeKpis.eventsContracts} negócios gerados`}
-          tone="var(--brand-primary)"
-        />
-        <CompactStatCard
-          icon={BarChart3}
-          label="TAXA CONVERSÃO"
-          value={`${activeKpis.conversionRate.toFixed(1)}%`}
-          sub="Lead p/ contrato"
-          tone="#10b981"
-        />
-        <CompactStatCard
-          icon={Activity}
-          label="TAXA DE GANHO"
-          value={`${activeKpis.winRate.toFixed(1)}%`}
-          sub="Ganhos vs Perdidos"
-          tone="#14b8a6"
-        />
-        <CompactStatCard
-          icon={TrendingUp}
-          label="LEADS ATIVOS"
-          value={`${activeKpis.activeLeads}`}
-          sub="No CRM agora"
-          tone="#38bdf8"
-        />
-        <CompactStatCard
-          icon={Zap}
-          label="OPORTUNIDADES"
-          value={`${activeKpis.lateStageOpportunities}`}
-          sub="Em negociação ativa"
-          tone="#f97316"
-        />
-      </div>
-
-
-
-      {/* LINHA 3 — 3 colunas: Funil | Ranking | Mix de Servicos */}
-      <div className="dashboard-three-col">
-        {/* Funil de Vendas */}
-        <div className="glass-card" style={{ padding: '18px 20px' }}>
-          <div style={{ marginBottom: '14px' }}>
-            <h3 style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--brand-text)', letterSpacing: '0.02em' }}>FUNIL DE VENDAS</h3>
-            <p style={{ color: 'var(--brand-muted)', fontSize: '0.74rem', marginTop: '2px' }}>Volume por estagio do CRM</p>
-          </div>
-          <div style={{ display: 'grid', gap: '12px' }}>
-            {activePipelineData.map((item, idx) => {
-              const width = maxPipelineCount > 0 ? Math.max((item.count / maxPipelineCount) * 100, item.count > 0 ? 6 : 0) : 0
-              return (
-                <div key={item.stage} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 44px', gap: '10px', alignItems: 'center' }}>
-                  <span style={{ color: '#c9d1d9', fontSize: '0.76rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.stage}</span>
-                  <div style={{ height: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '999px', overflow: 'hidden' }}>
-                    <div style={{ width: `${width}%`, height: '100%', borderRadius: '999px', background: pipelineColors[idx % pipelineColors.length], transition: 'width 0.35s ease' }} />
-                  </div>
-                  <span style={{ textAlign: 'right', color: 'var(--brand-text)', fontSize: '0.78rem', fontWeight: 800 }}>{item.count}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {/* Card 1: Ritmo do Mês (Reuniões Marcadas) */}
-          <div className="glass-card" style={{ padding: '24px 20px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', marginBottom: '18px', textAlign: 'center' }}>
-              <Flame size={26} color="#f97316" style={{ marginBottom: '4px' }} />
-              <h3 style={{ fontWeight: 900, fontSize: '1.05rem', color: 'var(--brand-text)', letterSpacing: '0.04em' }}>REUNIÕES MARCADAS</h3>
-              <p style={{ color: '#f97316', fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.06em' }}>RITMO DO MÊS</p>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '14px' }}>
-              {[
-                { label: 'Hoje', value: momentumData.today, color: momentumData.today > 0 ? '#10b981' : 'var(--brand-muted)' },
-                { label: 'Semana', value: momentumData.week, color: '#38bdf8' },
-                { label: 'Mês', value: momentumData.month, color: 'var(--brand-primary)' },
-              ].map(({ label, value, color }) => (
-                <div key={label} style={{
-                  textAlign: 'center', padding: '16px 6px', borderRadius: '12px',
-                  background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-                }}>
-                  <div style={{ fontSize: 'clamp(1.6rem, 2.5vw, 2.2rem)', fontWeight: 950, color, lineHeight: 1 }}>{value}</div>
-                  <div style={{ fontSize: '0.62rem', color: 'var(--brand-muted)', fontWeight: 800, marginTop: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-                </div>
-              ))}
-            </div>
+      <section className="dash-alert-grid">
+        <div className="glass-card dash-actions-card dash-actions-card-hot">
+          <div className="dash-section-title">
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <span style={{ fontSize: '0.72rem', color: 'var(--brand-primary)', fontWeight: 800 }}>
-                  {momentumData.meta > 0 ? Math.round((momentumData.month / momentumData.meta) * 100) : 0}% da meta mensal
-                </span>
-                <span style={{ fontSize: '0.72rem', color: 'var(--brand-muted)' }}>
-                  {momentumData.month}/{momentumData.meta}
-                </span>
+              <h2>Comando do dia</h2>
+              <p>Meta geral distribuída nos 5 focos</p>
+            </div>
+            <AlertCircle size={24} color="#ef4444" aria-hidden="true" />
+          </div>
+          <div className="dash-action-list">
+            <CommandMetric
+              label="Faltam"
+              value={remainingContracts}
+              caption="contratos para a meta"
+              tone="#ef4444"
+            />
+            <CommandMetric
+              label="Foco"
+              value={hottestCategory?.label || 'Geral'}
+              caption="categoria prioritária"
+              tone="var(--brand-primary)"
+            />
+            <CommandMetric
+              label="Agora"
+              value={commandNow}
+              caption={commandCaption}
+              tone="#38bdf8"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="dash-category-grid">
+        {categoryGoals.map((category) => {
+          const volume = category.contracts + category.activeLeads + category.proposals
+          const percent = Math.min(volume * 12, 100)
+          return (
+            <div key={category.key} className="glass-card dash-category-card" style={{ '--category-tone': category.tone } as CSSProperties}>
+              <div className="dash-category-head">
+                <span />
+                <strong>{category.label}</strong>
               </div>
-              <div style={{ height: '8px', background: 'rgba(255,255,255,0.06)', borderRadius: '999px', overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%', borderRadius: '999px', background: 'var(--brand-primary)',
-                  width: `${Math.min(momentumData.meta > 0 ? (momentumData.month / momentumData.meta) * 100 : 0, 100)}%`,
-                  transition: 'width 0.4s ease',
-                }} />
+              <div className="dash-category-metric">
+                <b>{category.contracts}</b>
+                <small>contratos</small>
+              </div>
+              <div className="dash-category-bar"><i style={{ width: `${percent}%` }} /></div>
+              <div className="dash-category-foot">
+                <span>{category.activeLeads} leads</span>
+                <span>{category.proposals} propostas</span>
+                <span>{category.stale} risco</span>
               </div>
             </div>
-          </div>
-        </div>
+          )
+        })}
+      </section>
 
-        {/* Mix de Servicos — Donut + legenda */}
-        <div className="glass-card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <h3 style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--brand-text)', letterSpacing: '0.02em' }}>
-              {isProductMode ? 'PARTICIPAÇÃO DO SERVIÇO' : 'MIX DE SERVIÇOS'}
-            </h3>
-            <span className="badge badge-gold">{isProductMode ? 'Foco' : 'Distribuição'}</span>
+      <section className="dash-risk-strip glass-card">
+        <div className="dash-risk-card dash-risk-card-hot">
+          <div className="dash-section-title">
+            <div>
+              <h2>Risco de perda</h2>
+              <p>{activeStaleLeads.length > 0 ? 'clientes que precisam de resgate' : 'sem cliente parado agora'}</p>
+            </div>
+            <ShieldAlert size={24} color="#ef4444" aria-hidden="true" />
           </div>
-          <p style={{ color: 'var(--brand-muted)', fontSize: '0.74rem', marginBottom: '14px' }}>
-            {isProductMode ? 'Peso do serviço na operação atual' : 'Participação % de cada serviço no funil'}
-          </p>
-          {(() => {
-            if (filteredProducts.length === 0) {
-              return (
-                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--brand-muted)', fontSize: '0.85rem' }}>
-                  Nenhum lead ativo no momento.
-                </div>
-              )
-            }
-            const lowestProduct = [...filteredProducts].sort((a, b) => Number(a.value || 0) - Number(b.value || 0))[0]
-            return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                  <div style={{ flexShrink: 0, width: '130px', height: '130px', borderRadius: '50%', background: donutSegments.length ? `conic-gradient(${donutSegments.join(', ')})` : 'rgba(255,255,255,0.04)', padding: '12px', boxSizing: 'border-box' }}>
-                    <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)' }} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: '100px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {filteredProducts.map((item, idx) => (
-                      <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{
-                          width: '10px', height: '10px', borderRadius: '3px', flexShrink: 0,
-                          background: item.color || colors[idx % colors.length],
-                          boxShadow: `0 0 6px ${item.color || colors[idx % colors.length]}66`,
-                        }} />
-                        <span style={{ flex: 1, fontSize: '0.78rem', color: '#c9d1d9', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {item.name}
-                        </span>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--brand-primary)', fontWeight: 800, flexShrink: 0 }}>
-                          {item.value}%
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {lowestProduct && !isProductMode && (
-                  <div style={{ 
-                    marginTop: 'auto', 
-                    padding: '12px', 
-                    background: 'rgba(239, 68, 68, 0.08)', 
-                    border: '1px solid rgba(239, 68, 68, 0.2)', 
-                    borderRadius: '8px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px'
-                  }}>
-                    <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <AlertCircle size={12} />
-                      Atenção ao Mix
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--brand-text)' }}>
-                      💡 Focar em vender mais <strong>{lowestProduct.name}</strong>, que está com apenas {lowestProduct.value}% de participação.
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })()}
+          <strong>{activeStaleLeads.length}</strong>
+          <p>{activeStaleLeads.length > 0 ? 'acionar antes de perder' : 'sem cliente parado agora'}</p>
+          {activeStaleLeads.slice(0, 2).map((lead) => (
+            <div key={lead.id || lead.name} className="dash-stale-row">
+              <span>{lead.name}</span>
+              <b>{lead.days_stale}d</b>
+            </div>
+          ))}
         </div>
-      </div>
+      </section>
 
-      {/* LINHA 4 — Contratos/Mês | Pipeline por etapa */}
-      <div className="dashboard-one-col">
-        {/* Contratos por Mês */}
-        <div className="glass-card" style={{ padding: '18px 20px' }}>
-          <div style={{ marginBottom: '14px' }}>
-            <h3 style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--brand-text)', letterSpacing: '0.02em' }}>CONTRATOS POR MÊS</h3>
-            <p style={{ color: 'var(--brand-muted)', fontSize: '0.74rem', marginTop: '2px' }}>Quantidade de contratos fechados nos últimos 6 meses</p>
+      <section className="dash-health-grid">
+        <StatCard icon={Users} label="Leads ativos" value={activeKpis.activeLeads} detail="oportunidades em movimento" tone="#38bdf8" />
+        <StatCard icon={Flame} label="Propostas abertas" value={activeKpis.lateStageOpportunities} detail="precisam de fechamento" tone="#ef4444" />
+        <StatCard icon={CheckCircle2} label="Contratos fechados" value={activeKpis.contracts} detail={`meta operacional: ${activeKpis.contractsMeta}`} tone="#22c55e" />
+        <StatCard icon={Target} label="Conversão" value={pct(activeKpis.conversionRate)} detail="lead para contrato" tone="var(--brand-primary)" />
+        <StatCard icon={Activity} label="Ciclo médio" value={`${Math.round(activeKpis.averagePipelineDays)}d`} detail="média de idade dos leads ativos" tone="#f97316" />
+        <StatCard icon={TrendingUp} label="Serviço líder" value={leadingProduct ? `${leadingProduct.value}%` : '0%'} detail={leadingProduct?.name || 'sem volume ativo'} tone={leadingProduct?.color || '#94a3b8'} />
+      </section>
+
+      <section className="dash-main-grid">
+        <div className="glass-card dash-pipeline-card">
+          <div className="dash-section-title">
+            <div>
+              <h2>Funil em 5 etapas</h2>
+              <p>Onde está travando</p>
+            </div>
+            <BarChart3 size={20} color="var(--brand-primary)" aria-hidden="true" />
           </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '20px', minHeight: '180px', paddingTop: '12px' }}>
-            {contractsMonthly.map((item) => {
-              const maxContracts = Math.max(...contractsMonthly.map((month) => month.contratos), 1)
-              const height = Math.max((item.contratos / maxContracts) * 100, item.contratos > 0 ? 8 : 4)
+          <div className="dash-pipeline-list">
+            {activePipelineData.map((stage) => {
+              const color = STAGE_COLORS[stage.stage] || 'var(--brand-primary)'
+              const width = Math.max((stage.count / maxPipelineCount) * 100, stage.count > 0 ? 8 : 0)
               return (
-                <div key={item.mes} style={{ flex: 1, display: 'grid', gap: '8px', justifyItems: 'center' }}>
-                  <div style={{ width: '100%', display: 'flex', alignItems: 'end', justifyContent: 'center', minHeight: '130px' }}>
-                    <div style={{ width: '40px', height: `${height}%`, minHeight: '8px', borderRadius: '12px 12px 4px 4px', background: 'var(--brand-primary)', boxShadow: '0 10px 18px rgba(251,191,36,0.18)' }} />
+                <div key={stage.stage} className="dash-pipeline-row">
+                  <div>
+                    <span style={{ background: color }} />
+                    <strong>{STAGE_LABELS[stage.stage] || stage.stage}</strong>
                   </div>
-                  <span style={{ color: 'var(--brand-muted)', fontSize: '0.72rem', fontWeight: 700 }}>{item.mes}</span>
-                  <span style={{ color: 'var(--brand-text)', fontSize: '0.78rem', fontWeight: 800 }}>{item.contratos}</span>
+                  <div>
+                    <i style={{ width: `${width}%`, background: color }} />
+                  </div>
+                  <b>{stage.count}</b>
                 </div>
               )
             })}
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* LINHA 5 — Atividade recente (4 colunas para TV) */}
-      <div className="glass-card" style={{ padding: '18px 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-          <CalendarClock size={18} color="var(--brand-primary)" />
-          <h3 style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--brand-text)', letterSpacing: '0.02em' }}>ÚLTIMAS MOVIMENTAÇÕES</h3>
+      <section className="dash-secondary-grid">
+        <div className="glass-card dash-service-card">
+          <div className="dash-section-title">
+            <div>
+              <h2>Mix de serviços</h2>
+              <p>Volume por serviço</p>
+            </div>
+            <Zap size={20} color="#38bdf8" aria-hidden="true" />
+          </div>
+          <div className="dash-service-list">
+            {(() => {
+              const realProducts = productData.filter(
+                (product) =>
+                  product.name.toLowerCase() !== 'geral' &&
+                  product.name.toLowerCase() !== 'sem leads ativos'
+              ).sort((left, right) => right.value - left.value).slice(0, 5)
+              if (realProducts.length === 0) {
+                return <div className="dash-empty">Nenhum serviço com volume ativo no momento.</div>
+              }
+              return realProducts.map((product, index) => (
+                <div key={product.name} className="dash-service-row dash-service-row-card">
+                  <em>{index + 1}</em>
+                  <span style={{ background: product.color }} />
+                  <strong>{product.name}</strong>
+                  <div><i style={{ width: `${Math.min(product.value, 100)}%`, background: product.color }} /></div>
+                  <b>{product.value}%</b>
+                </div>
+              ))
+            })()}
+          </div>
+        </div>
+
+        <div className="glass-card dash-rhythm-card">
+          <div className="dash-section-title">
+            <div>
+              <h2>Ritmo do mês</h2>
+              <p>Fechamentos registrados</p>
+            </div>
+            <CalendarClock size={20} color="var(--brand-primary)" aria-hidden="true" />
+          </div>
+          <div className="dash-rhythm-grid">
+            <div><em style={{ fontSize: '1.5rem', lineHeight: 1 }}>🔥</em><strong>{momentumData.today}</strong><span>Hoje</span></div>
+            <div><em style={{ fontSize: '1.5rem', lineHeight: 1 }}>📅</em><strong>{momentumData.week}</strong><span>7 dias</span></div>
+            <div><em style={{ fontSize: '1.5rem', lineHeight: 1 }}>🎯</em><strong>{momentumData.month}</strong><span>Mês</span></div>
+          </div>
+          <div className="dash-rhythm-progress">
+            <div>
+              <span>Ritmo contra meta</span>
+              <b>{momentumData.meta > 0 ? Math.round((momentumData.month / momentumData.meta) * 100) : 0}%</b>
+            </div>
+            <i>
+              <span style={{ width: `${Math.min(momentumData.meta > 0 ? (momentumData.month / momentumData.meta) * 100 : 0, 100)}%` }} />
+            </i>
+          </div>
+          <div className="dash-month-nav">
+            <button type="button" onClick={() => goToMonth(-1)} aria-label="Mês anterior">‹</button>
+            <span>{currentPeriodLabel.charAt(0).toUpperCase() + currentPeriodLabel.slice(1)}</span>
+            <button type="button" onClick={() => goToMonth(1)} aria-label="Próximo mês">›</button>
+          </div>
+        </div>
+
+      </section>
+
+      <section className="glass-card dash-activity-card">
+        <div className="dash-section-title">
+          <div>
+            <h2>Últimas movimentações</h2>
+            <p>O que mudou recentemente</p>
+          </div>
+          <ArrowRight size={20} color="var(--brand-primary)" aria-hidden="true" />
         </div>
         {activeRecentActivity.length > 0 ? (
-          <div className="dashboard-activity-grid">
+          <div className="dash-activity-grid">
             {activeRecentActivity.map((activity) => (
-              <div
-                key={`${activity.tipo}-${activity.desc}-${activity.tempo}`}
-                style={{
-                  padding: '14px 16px',
-                  borderRadius: '12px',
-                  background: 'rgba(251, 191, 36, 0.03)',
-                  border: '1px solid rgba(251, 191, 36, 0.08)',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                  <span style={{ fontWeight: 800, fontSize: '0.85rem', color: 'var(--brand-text)' }}>{activity.tipo}</span>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--brand-muted)', fontWeight: 700, flexShrink: 0 }}>{activity.tempo}</span>
+              <div key={`${activity.tipo}-${activity.desc}-${activity.tempo}`}>
+                <div>
+                  <strong>{activity.tipo}</strong>
+                  <span>{activity.tempo}</span>
                 </div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--brand-muted)', lineHeight: 1.5 }}>{activity.desc}</p>
-                <div style={{ marginTop: '8px', fontSize: '0.74rem', color: activity.cor, fontWeight: 800 }}>{activity.valor}</div>
+                <p>{activity.desc}</p>
+                <small style={{ color: activity.cor }}>{activity.valor}</small>
               </div>
             ))}
           </div>
         ) : (
-          <div style={{ padding: '18px', borderRadius: '12px', border: '1px dashed rgba(251, 191, 36, 0.12)', color: 'var(--brand-muted)', fontSize: '0.8rem' }}>
-            Nenhuma movimentação registrada ainda.
-          </div>
+          <div className="dash-empty">Nenhuma movimentação registrada ainda.</div>
         )}
-      </div>
+      </section>
+
+      <section className="glass-card dash-contracts-card">
+        <div className="dash-section-title">
+          <div>
+            <h2>Histórico de contratos</h2>
+            <p>Total somado: {contractsHistoryTotal} contratos nos últimos meses</p>
+          </div>
+          <Target size={20} color="#22c55e" aria-hidden="true" />
+        </div>
+        <div className="dash-contract-bars">
+          {contractsMonthly.map((month) => {
+            const maxContracts = Math.max(...contractsMonthly.map((item) => item.contratos), 1)
+            const height = Math.max((month.contratos / maxContracts) * 100, month.contratos > 0 ? 10 : 3)
+            return (
+              <div key={month.mes}>
+                <div><span style={{ height: `${height}%` }} /></div>
+                <b>{month.contratos}</b>
+                <small>{month.mes}</small>
+              </div>
+            )
+          })}
+        </div>
+      </section>
 
       <style>{`
-        .dashboard-mode-chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 7px 14px;
-          border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.07);
-          background: rgba(255,255,255,0.03);
-          color: var(--brand-muted);
-          font-size: 0.74rem;
-          font-weight: 800;
-          cursor: pointer;
-          transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+        .dashboard-v3 {
+          width: 100%;
+          max-width: 1600px;
+          margin: 0 auto;
+          display: grid;
+          gap: 20px;
         }
 
-        .dashboard-mode-chip[data-active='true'] {
-          background: rgba(251,191,36,0.12);
-          border-color: rgba(251,191,36,0.22);
+        .dash-command {
+          position: relative;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 8px;
+          align-items: start;
+          padding-right: 44px;
+        }
+
+        .dash-command-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 14px;
+          max-width: 1120px;
+        }
+
+        .dash-command-copy h1 {
+          color: var(--brand-text);
+          font-family: 'Arial Narrow', 'Roboto Condensed', 'Inter Tight', 'Segoe UI', sans-serif;
+          font-size: clamp(1.25rem, 1.75vw, 1.95rem);
+          font-weight: 900;
+          line-height: 1.05;
+          margin: 8px 0 4px;
+          max-width: none;
+          letter-spacing: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .dash-command-copy p,
+        .dash-section-title p {
+          color: var(--brand-muted);
+          font-size: 0.9rem;
+          line-height: 1.5;
+        }
+
+        .dash-command-copy p {
+          display: none;
+          max-width: 720px;
+          font-size: 0.92rem;
+          color: #9fb1cc;
+          padding-left: 12px;
+          border-left: 2px solid rgba(212,160,23,0.75);
+        }
+
+        .dash-eyebrow {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          color: var(--brand-primary);
+          font-size: 0.72rem;
+          font-weight: 900;
+          text-transform: uppercase;
+        }
+
+        .dash-tv-toggle {
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 30px;
+          height: 30px;
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 7px;
+          background: rgba(255,255,255,0.035);
+          color: var(--brand-muted);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .dash-tv-toggle[data-active='true'] {
+          border-color: rgba(34,197,94,0.34);
+          background: rgba(34,197,94,0.12);
+          color: #86efac;
+        }
+
+        .dash-health-grid {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 14px;
+        }
+
+        .dash-stat-card {
+          min-height: 96px;
+          padding: 13px;
+          display: grid;
+          align-content: space-between;
+          gap: 8px;
+          background: rgba(255,255,255,0.018) !important;
+        }
+
+        .dash-stat-top,
+        .dash-section-title {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .dash-stat-top span {
+          color: var(--brand-muted);
+          font-family: var(--font-label);
+          font-size: 0.7rem;
+          font-weight: 900;
+          text-transform: uppercase;
+        }
+
+        .dash-stat-card strong {
+          font-size: 1.45rem;
+          line-height: 1;
+        }
+
+        .dash-stat-card small {
+          color: var(--brand-muted);
+          font-size: 0.76rem;
+          line-height: 1.35;
+        }
+
+        .dash-main-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 14px;
+        }
+
+        .dash-alert-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 0;
+        }
+
+        .dash-category-grid {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 14px;
+        }
+
+        .dash-actions-card,
+        .dash-pipeline-card,
+        .dash-service-card,
+        .dash-rhythm-card,
+        .dash-risk-card,
+        .dash-risk-strip,
+        .dash-activity-card,
+        .dash-contracts-card {
+          padding: 16px;
+          display: grid;
+          gap: 12px;
+        }
+
+        .dash-actions-card {
+          padding: 14px 16px;
+        }
+
+        .dash-actions-card-hot {
+          border-color: rgba(239,68,68,0.26) !important;
+          background: linear-gradient(135deg, rgba(69,10,10,0.24), rgba(8,11,16,0.98)) !important;
+          box-shadow: 0 14px 34px rgba(127,29,29,0.12);
+        }
+
+        .dash-risk-card-hot {
+          display: grid;
+          grid-template-columns: minmax(180px, 1fr) auto minmax(220px, 1.2fr);
+          align-items: center;
+          gap: 14px;
+          padding: 0;
+          border: 0 !important;
+          background: transparent !important;
+          box-shadow: none;
+        }
+
+        .dash-risk-card-hot .dash-section-title {
+          align-items: center;
+        }
+
+        .dash-risk-card-hot .dash-section-title h2 {
+          color: #fecaca;
+        }
+
+        .dash-risk-card-hot .dash-section-title p {
+          display: block;
+        }
+
+        .dash-risk-card-hot > strong {
+          color: #ef4444;
+          font-size: 1.8rem;
+          text-align: center;
+        }
+
+        .dash-risk-card-hot > p {
+          color: #fecaca;
+          margin-top: 0;
+          display: none;
+        }
+
+        .dash-section-title h2 {
+          color: var(--brand-text);
+          font-size: 0.98rem;
+          font-weight: 900;
+          margin: 0 0 3px;
+        }
+
+        .dash-action-list {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .dash-command-metric {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          gap: 4px 12px;
+          border: 1px solid;
+          border-radius: 8px;
+          padding: 11px 12px;
+          min-height: 70px;
+          align-content: center;
+          align-items: center;
+          min-width: 0;
+        }
+
+        .dash-command-metric > span {
+          font-size: 0.68rem;
+          font-weight: 950;
+          text-transform: uppercase;
+          grid-column: 1 / -1;
+        }
+
+        .dash-command-metric strong {
+          color: var(--brand-text);
+          font-size: clamp(1.15rem, 1.55vw, 1.65rem);
+          line-height: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .dash-command-metric small {
+          color: var(--brand-muted);
+          font-size: 0.72rem;
+          line-height: 1.35;
+        }
+
+        .dash-activity-grid strong {
+          color: var(--brand-text);
+          font-size: 1rem;
+          line-height: 1.25;
+          display: block;
+        }
+
+        .dash-activity-grid p,
+        .dash-activity-grid span,
+        .dash-activity-grid small {
+          color: var(--brand-muted);
+          font-size: 0.78rem;
+          line-height: 1.45;
+        }
+
+        .dash-category-card {
+          padding: 12px;
+          display: grid;
+          gap: 9px;
+          border-color: color-mix(in srgb, var(--category-tone), transparent 74%) !important;
+          background: linear-gradient(160deg, color-mix(in srgb, var(--category-tone), transparent 92%), rgba(8,11,16,0.94)) !important;
+        }
+
+        .dash-category-head {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .dash-category-head span {
+          width: 9px;
+          height: 9px;
+          border-radius: 999px;
+          background: var(--category-tone);
+        }
+
+        .dash-category-head strong {
+          color: var(--brand-text);
+          font-size: 0.86rem;
+        }
+
+        .dash-category-metric {
+          display: flex;
+          align-items: baseline;
+          gap: 6px;
+        }
+
+        .dash-category-metric b {
+          color: var(--category-tone);
+          font-size: 1.55rem;
+          line-height: 1;
+        }
+
+        .dash-category-metric small {
+          color: var(--brand-muted);
+          font-size: 0.76rem;
+        }
+
+        .dash-category-bar {
+          height: 6px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.06);
+          overflow: hidden;
+        }
+
+        .dash-category-bar i {
+          display: block;
+          height: 100%;
+          border-radius: 999px;
+          background: var(--category-tone);
+        }
+
+        .dash-category-foot {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .dash-category-foot span {
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 999px;
+          color: #9aa8ba;
+          padding: 3px 6px;
+          font-size: 0.64rem;
+          font-weight: 800;
+        }
+
+        .dash-pipeline-list,
+        .dash-service-list {
+          display: grid;
+          gap: 9px;
+        }
+
+        .dash-pipeline-row {
+          display: grid;
+          grid-template-columns: 150px minmax(0, 1fr) 34px;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .dash-pipeline-row > div:first-child {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .dash-pipeline-row span {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          flex-shrink: 0;
+        }
+
+        .dash-pipeline-row strong,
+        .dash-service-row strong {
+          color: #c9d1d9;
+          font-size: 0.82rem;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .dash-pipeline-row > div:nth-child(2),
+        .dash-service-row > div {
+          height: 9px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.055);
+          overflow: hidden;
+        }
+
+        .dash-pipeline-row i,
+        .dash-service-row i {
+          display: block;
+          height: 100%;
+          border-radius: 999px;
+        }
+
+        .dash-pipeline-row b,
+        .dash-service-row b {
+          color: var(--brand-text);
+          text-align: right;
+          font-size: 0.82rem;
+        }
+
+        .dash-secondary-grid {
+          display: grid;
+          grid-template-columns: minmax(300px, 0.8fr) minmax(420px, 1.2fr);
+          gap: 18px;
+          align-items: start;
+        }
+
+        .dash-rhythm-card {
+          order: 2;
+          justify-self: center;
+          width: 100%;
+          max-width: 720px;
+        }
+
+        .dash-service-card {
+          order: 1;
+          align-self: start;
+        }
+
+        .dash-service-row {
+          display: grid;
+          grid-template-columns: 24px 8px minmax(110px, 190px) minmax(0, 1fr) 40px;
+          gap: 8px;
+          align-items: center;
+        }
+
+        .dash-service-row-card {
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 8px;
+          background: rgba(255,255,255,0.025);
+          padding: 8px;
+        }
+
+        .dash-service-row em {
+          width: 22px;
+          height: 22px;
+          border-radius: 7px;
+          display: grid;
+          place-items: center;
+          background: rgba(255,255,255,0.06);
+          color: #c9d1d9;
+          font-style: normal;
+          font-weight: 900;
+          font-size: 0.74rem;
+        }
+
+        .dash-service-row > span {
+          width: 9px;
+          height: 9px;
+          border-radius: 999px;
+        }
+
+        .dash-rhythm-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 8px;
+        }
+
+        .dash-rhythm-grid div {
+          position: relative;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 8px;
+          background: rgba(255,255,255,0.03);
+          padding: 16px 8px 12px;
+          text-align: center;
+          overflow: hidden;
+        }
+
+        .dash-rhythm-grid em {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 34px;
+          height: 34px;
+          border-radius: 10px;
+          background: rgba(212,160,23,0.09);
+          color: var(--brand-primary);
+          line-height: 1;
+          margin: 0 auto 10px;
+          font-style: normal;
+        }
+
+        .dash-rhythm-grid strong,
+        .dash-risk-card > strong {
+          display: block;
+          color: var(--brand-primary);
+          font-size: 1.8rem;
+          line-height: 1;
+        }
+
+        .dash-rhythm-grid span,
+        .dash-risk-card p {
+          display: block;
+          color: var(--brand-muted);
+          font-size: 0.72rem;
+          margin-top: 6px;
+        }
+
+        .dash-rhythm-progress {
+          display: grid;
+          gap: 8px;
+          border: 1px solid rgba(212,160,23,0.18);
+          border-radius: 8px;
+          background: rgba(212,160,23,0.06);
+          padding: 12px;
+        }
+
+        .dash-rhythm-scope {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .dash-rhythm-scope span {
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 8px;
+          background: rgba(255,255,255,0.025);
+          padding: 8px 6px;
+          color: var(--brand-muted);
+          font-size: 0.66rem;
+          font-weight: 900;
+          text-align: center;
+          text-transform: uppercase;
+          letter-spacing: 0;
+        }
+
+        .dash-rhythm-scope b {
+          display: block;
+          color: var(--brand-text);
+          font-size: 0.95rem;
+          line-height: 1;
+          margin-bottom: 3px;
+        }
+
+        .dash-rhythm-progress div {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          color: var(--brand-muted);
+          font-size: 0.76rem;
+          font-weight: 800;
+        }
+
+        .dash-rhythm-progress b {
           color: var(--brand-primary);
         }
 
-        .dashboard-mode-chip:hover {
+        .dash-rhythm-progress i {
+          display: block;
+          height: 9px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.08);
+          overflow: hidden;
+        }
+
+        .dash-rhythm-progress i span {
+          display: block;
+          height: 100%;
+          border-radius: 999px;
+          background: linear-gradient(90deg, var(--brand-primary), #facc15);
+        }
+
+        .dash-month-nav {
+          height: 44px;
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 8px;
+          background: rgba(255,255,255,0.035);
+          display: grid;
+          grid-template-columns: 42px minmax(0, 1fr) 42px;
+          align-items: center;
+          overflow: hidden;
+        }
+
+        .dash-month-nav button {
+          height: 100%;
+          border: 0;
+          background: rgba(255,255,255,0.035);
+          color: var(--brand-primary);
+          font-size: 1.45rem;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .dash-month-nav span {
           color: var(--brand-text);
-          border-color: rgba(251,191,36,0.16);
+          text-align: center;
+          font-weight: 900;
+          font-size: 0.92rem;
         }
 
-        .dashboard-kpi-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
-          gap: 12px;
-          margin-bottom: 8px;
+        .dash-stale-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          border-top: 1px solid rgba(255,255,255,0.07);
+          padding-top: 9px;
+          color: #c9d1d9;
+          font-size: 0.78rem;
         }
 
-        .dashboard-three-col {
-          display: grid;
-          grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.85fr) minmax(0, 0.9fr);
-          gap: 14px;
-          align-items: start;
+        .dash-stale-row b {
+          color: #ef4444;
         }
 
-        .dashboard-two-col {
-          display: grid;
-          grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
-          gap: 14px;
-          align-items: start;
+        .dash-stale-row span {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
-        .dashboard-activity-grid {
+        .dash-activity-grid {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 12px;
         }
 
-        .dashboard-one-col {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 14px;
+        .dash-activity-grid > div {
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 8px;
+          background: rgba(255,255,255,0.025);
+          padding: 13px;
         }
 
-        .dashboard-search-input {
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 10px;
-          padding: 10px 12px 10px 38px;
-          color: var(--brand-text);
-          font-size: 0.85rem;
-          font-family: inherit;
-          outline: none;
-          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        .dash-activity-grid > div > div {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 6px;
         }
 
-        .dashboard-search-input:focus {
-          border-color: rgba(251, 191, 36, 0.4);
-          box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.08);
-        }
-
-        .dashboard-search-input::placeholder {
+        .dash-empty {
+          border: 1px dashed rgba(255,255,255,0.12);
+          border-radius: 8px;
           color: var(--brand-muted);
+          padding: 18px;
         }
 
-        .search-result-item:hover {
-          background: rgba(255,255,255,0.05) !important;
-          color: var(--brand-text) !important;
+        .dash-contract-bars {
+          min-height: 150px;
+          display: flex;
+          align-items: end;
+          gap: 18px;
         }
 
-        @media (max-width: 1280px) {
-          .dashboard-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
-          .dashboard-three-col { grid-template-columns: 1fr 1fr !important; }
-          .dashboard-activity-grid { grid-template-columns: repeat(2, 1fr) !important; }
+        .dash-contract-bars > div {
+          flex: 1;
+          display: grid;
+          justify-items: center;
+          gap: 6px;
         }
 
-        @media (max-width: 1100px) {
-          .dashboard-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
-          .dashboard-two-col { grid-template-columns: 1fr !important; }
+        .dash-contract-bars > div > div {
+          width: 100%;
+          height: 110px;
+          display: flex;
+          align-items: end;
+          justify-content: center;
         }
 
-        @media (max-width: 768px) {
-          .dashboard-kpi-grid { grid-template-columns: repeat(2, 1fr); }
-          .dashboard-three-col { grid-template-columns: 1fr !important; }
-          .dashboard-activity-grid { grid-template-columns: 1fr !important; }
+        .dash-contract-bars span {
+          display: block;
+          width: 34px;
+          min-height: 5px;
+          border-radius: 8px 8px 3px 3px;
+          background: var(--brand-primary);
+        }
+
+        .dash-contract-bars b {
+          color: var(--brand-text);
+          font-size: 0.8rem;
+        }
+
+        .dash-contract-bars small {
+          color: var(--brand-muted);
+          font-size: 0.72rem;
+        }
+
+        @media (max-width: 1200px) {
+          .dash-command {
+            padding-right: 0;
+          }
+          .dash-tv-toggle {
+            position: static;
+            justify-self: start;
+          }
+          .dash-health-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+          .dash-main-grid,
+          .dash-secondary-grid,
+          .dash-command {
+            grid-template-columns: 1fr;
+          }
+          .dash-risk-card-hot {
+            grid-template-columns: 1fr;
+            align-items: start;
+          }
+          .dash-category-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .dash-activity-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 720px) {
+          .dash-health-grid,
+          .dash-activity-grid {
+            grid-template-columns: 1fr;
+          }
+          .dash-action-list {
+            grid-template-columns: 1fr;
+          }
+          .dash-pipeline-row {
+            grid-template-columns: 120px minmax(0, 1fr) 30px;
+          }
+          .dash-service-row {
+            grid-template-columns: 28px 10px minmax(0, 1fr) 42px;
+          }
+          .dash-service-row > div {
+            grid-column: 3 / -1;
+          }
+          .dash-category-grid {
+            grid-template-columns: 1fr;
+          }
+          .dash-rhythm-scope {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
         }
       `}</style>
     </div>

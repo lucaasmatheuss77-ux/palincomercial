@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import Image from 'next/image'
 import type { LucideIcon } from 'lucide-react'
+import { StarFieldGlobal } from '@/components/StarFieldGlobal'
 import InsiderLogo from '@/components/insider-logo'
 import {
   BadgeDollarSign,
@@ -22,6 +23,8 @@ import {
   UserCircle2,
   Users2,
   UserSearch,
+  ClipboardCheck,
+  Shield,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import BrandLogo from '@/components/brand-logo'
@@ -44,13 +47,14 @@ const navItems: NavItem[] = [
   { href: '/dashboard/produtos', label: 'Produtos', icon: Package, accent: '#10b981' },
   { href: '/dashboard/clientes', label: 'Clientes', icon: FileText, accent: '#38bdf8' },
   { href: '/dashboard/pipeline', label: 'CRM', icon: Rocket, accent: '#f97316' },
+  { href: '/dashboard/onboarding', label: 'Onboarding', icon: ClipboardCheck, accent: '#0d9488' },
+  { href: '/dashboard/analise-credito', label: 'Análise de Crédito', icon: Shield, accent: '#eab308' },
   { href: '/dashboard/agenda', label: 'Reunioes', icon: CalendarDays, accent: '#22c55e' },
   { href: '/dashboard/eventos', label: 'Eventos', icon: PartyPopper, accent: '#14b8a6' },
   { href: '/dashboard/clube', label: 'Clube', icon: null, accent: '#0ea5e9', customIcon: (color: string) => <InsiderLogo size={17} color={color} /> },
   { href: '/dashboard/metas', label: 'Metas', icon: Target, accent: '#e879f9' },
   { href: '/dashboard/comissoes', label: 'Comissoes', icon: BadgeDollarSign, accent: '#fb7185' },
   { href: '/dashboard/relatorios', label: 'Relatorios', icon: BarChart3, accent: '#38bdf8' },
-  { href: '/dashboard/indicadores', label: 'Indicadores', icon: LineChart, accent: '#059669' },
   { href: '/dashboard/planejamento', label: 'Planejamento', icon: Target, accent: '#f43f5e' },
 ]
 
@@ -112,17 +116,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--brand-darker)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: '#010409' }}>
+      <StarFieldGlobal />
       <header
         style={{
-          background: 'rgba(13,17,23,0.97)',
-          borderBottom: '1px solid rgba(251,191,36,0.15)',
+          background: 'rgba(5,8,14,0.88)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          borderBottom: '1px solid rgba(212,160,23,0.14)',
           display: 'flex',
           flexDirection: 'column',
           position: 'sticky',
           top: 0,
           zIndex: 100,
-          boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.5), inset 0 -1px 0 rgba(212,160,23,0.08)',
         }}
       >
         {/* TOP BAR: Logo + Agent Selector */}
@@ -170,8 +177,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               gap: '10px',
               padding: '6px 12px 6px 6px',
               borderRadius: '12px',
-              border: '1px solid rgba(251,191,36,0.25)',
-              background: 'rgba(251,191,36,0.05)',
+              border: '1px solid rgba(251,191,36,0.12)',
+              background: 'rgba(251,191,36,0.03)',
               textDecoration: 'none',
               flexShrink: 0,
               transition: 'all 0.2s ease',
@@ -236,18 +243,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      padding: '8px 12px',
-                      borderRadius: '8px',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      color: isActive ? 'var(--brand-primary)' : '#adbac7',
-                      background: isActive ? 'rgba(251,191,36,0.12)' : 'transparent',
-                      transition: 'color 0.15s ease, background-color 0.15s ease',
-                      border: 'none',
+                      gap: '7px',
+                      padding: '7px 13px',
+                      borderRadius: '7px',
+                      color: isActive ? 'var(--brand-primary)' : 'var(--brand-muted)',
+                      background: isActive ? 'rgba(212,160,23,0.12)' : 'transparent',
+                      border: isActive ? 'none' : 'none',
+                      borderBottom: isActive ? '2px solid var(--brand-primary)' : '2px solid transparent',
                       textDecoration: 'none',
-                      minHeight: '40px',
+                      minHeight: '38px',
                       flexShrink: 0,
+                      transition: 'color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease',
                     }}
                   >
                     {customIcon ? customIcon(isActive ? 'var(--brand-primary)' : '#adbac7') : Icon ? <Icon size={17} aria-hidden="true" /> : null}
@@ -264,17 +270,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
+                  gap: '7px',
+                  padding: '7px 13px',
+                  borderRadius: '7px',
                   color: 'var(--brand-muted)',
                   background: 'transparent',
                   border: 'none',
+                  borderBottom: '2px solid transparent',
                   cursor: 'pointer',
                   flexShrink: 0,
-                  minHeight: '40px',
+                  minHeight: '38px',
+                  transition: 'color 0.15s ease, background-color 0.15s ease',
                 }}
                 aria-label="Sair"
               >
@@ -303,131 +309,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             zIndex: 900,
           }}
         >
-          <UserCircle2 size={24} color="#0d1117" />
+          <UserCircle2 size={22} color="#05080d" />
           <div className="aura-fab-label">PALIN AI</div>
         </button>
       )}
 
       <AgendaAssistantPanel isOpen={isAgendaOpen} onClose={() => setIsAgendaOpen(false)} userId={userId} />
-
-      <style>{`
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        .menu-scroll-shell {
-          width: 100%;
-          min-width: 0;
-          position: relative;
-          overflow: hidden;
-          border-radius: 8px;
-        }
-
-        .menu-scroll-shell[data-compact='true']:before,
-        .menu-scroll-shell[data-compact='true']:after {
-          content: "";
-          position: absolute;
-          top: 0;
-          bottom: 0;
-          width: 20px;
-          z-index: 2;
-          pointer-events: none;
-        }
-
-        .menu-scroll-shell[data-compact='true']:before {
-          left: 0;
-          background: linear-gradient(90deg, rgba(13,17,23,0.97), rgba(13,17,23,0));
-        }
-
-        .menu-scroll-shell[data-compact='true']:after {
-          right: 0;
-          background: linear-gradient(270deg, rgba(13,17,23,0.97), rgba(13,17,23,0));
-        }
-
-        .nav-link-clean {
-          position: relative;
-        }
-
-        .nav-link-clean:not(.nav-link-active):hover {
-          color: var(--brand-text) !important;
-          background-color: rgba(255,255,255,0.05) !important;
-        }
-
-        .nav-link-clean:focus-visible {
-          outline: 2px solid rgba(251,191,36,0.7);
-          outline-offset: 2px;
-          color: var(--brand-text) !important;
-        }
-
-        @media (max-width: 960px) {
-          .dashboard-page-shell {
-            padding: 16px !important;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .dashboard-page-shell {
-            padding: 12px !important;
-          }
-        }
-
-        .aura-fab-responsive {
-          bottom: 32px;
-          right: 32px;
-          width: 56px;
-          height: 56px;
-          border-radius: 50%;
-          background: var(--brand-primary);
-          border: none;
-          box-shadow: 0 8px 32px rgba(251, 191, 36, 0.3);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-
-        @media (max-width: 768px) {
-          .aura-fab-responsive {
-            bottom: 20px;
-            right: 50%;
-            transform: translateX(50%);
-            width: 48px;
-            height: 48px;
-          }
-          
-          /* Hide label on mobile to avoid clutter */
-          .aura-fab-label {
-            display: none;
-          }
-        }
-
-        .aura-fab-responsive:hover {
-          transform: scale(1.1) translateY(-4px);
-          box-shadow: 0 12px 40px rgba(251, 191, 36, 0.4);
-        }
-
-        .aura-fab-label {
-          position: absolute;
-          right: 100%;
-          margin-right: 12px;
-          background: var(--brand-primary);
-          color: #0d1117;
-          padding: 6px 12px;
-          border-radius: 8px;
-          font-size: 0.75rem;
-          font-weight: 800;
-          white-space: nowrap;
-          opacity: 0;
-          transform: translateX(10px);
-          transition: all 0.2s ease;
-          pointer-events: none;
-        }
-
-        .aura-fab-responsive:hover .aura-fab-label {
-          opacity: 1;
-          transform: translateX(0);
-        }
-      `}</style>
     </div>
   )
 }
+// SEO Helper: og: name="description" <title>

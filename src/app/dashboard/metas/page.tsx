@@ -13,7 +13,7 @@ export default async function MetasPage() {
     { data: goals },
   ] = await Promise.all([
     supabase.from('profiles').select('id, full_name, role').eq('active', true).order('full_name'),
-    supabase.from('leads').select('id, name, consultant_id, product_id, stage, created_at'),
+    supabase.from('leads').select('id, name, consultant_id, product_id, stage, created_at').limit(10000),
     supabase.from('products').select('id, name, emoji, color').eq('active', true).order('name'),
     supabase
       .from('sales_goals')

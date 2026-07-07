@@ -1,0 +1,1 @@
+ALTER TABLE public.profiles ADD COLUMN planejamento_access boolean DEFAULT false;

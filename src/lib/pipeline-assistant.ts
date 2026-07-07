@@ -46,11 +46,11 @@ function normalizeText(value: string) {
 }
 
 function getLeadTemperature(lead: PipelineLeadSnapshot) {
-  if (lead.stage === 'Negociacao' || lead.stage === 'Fechado') {
+  if (lead.stage === 'Proposta' || lead.stage === 'Fechado') {
     return { label: 'Quente', color: '#f97316', background: 'rgba(249,115,22,0.12)' }
   }
 
-  if (lead.ai_score >= 80 || lead.stage === 'Proposta') {
+  if (lead.ai_score >= 80) {
     return { label: 'Promissor', color: '#93c5fd', background: 'rgba(96,165,250,0.12)' }
   }
 
@@ -70,16 +70,14 @@ const CADENCE_RULES: Record<string, { days: number; action: string }> = {
   'Contato Inicial': { days: 3, action: 'Fazer primeiro contato agora — prazo de 3 dias ativo.' },
   Qualificacao: { days: 5, action: 'Agendar reunião urgente — 5 dias é o limite.' },
   Apresentacao: { days: 5, action: 'Apresentar solução ou reengajar o lead.' },
-  Proposta: { days: 4, action: 'Enviar proposta — lead esperando há mais de 4 dias.' },
-  Negociacao: { days: 2, action: 'Retomar negociação — prazo crítico de 2 dias.' },
+  Proposta: { days: 4, action: 'Enviar proposta e fazer follow-up urgente.' },
 }
 
 function getLeadNextAction(lead: PipelineLeadSnapshot) {
   if (lead.stage === 'Contato Inicial') return 'Fazer primeiro contato e validar interesse.'
   if (lead.stage === 'Qualificacao') return 'Confirmar dor, escopo e potencial de compra.'
   if (lead.stage === 'Apresentacao') return 'Amarrar necessidade e desenhar proposta aderente.'
-  if (lead.stage === 'Proposta') return 'Apresentar valor e remover objeções iniciais.'
-  if (lead.stage === 'Negociacao') return 'Fechar pendências comerciais e acelerar decisão.'
+  if (lead.stage === 'Proposta') return 'Ligar urgente, apresentar valor e remover objeções para fechar.'
   return 'Registrar aprendizados e preparar expansão da conta.'
 }
 
@@ -131,8 +129,7 @@ function getAssistantMode(query: string): { mode: PipelineAssistantMode; label: 
 }
 
 function getStageScore(stage: PipelineLeadSnapshot['stage']) {
-  if (stage === 'Negociacao') return 40
-  if (stage === 'Proposta') return 34
+  if (stage === 'Proposta') return 40
   if (stage === 'Apresentacao') return 24
   if (stage === 'Qualificacao') return 18
   if (stage === 'Contato Inicial') return 10
@@ -304,22 +301,19 @@ function getLeadBandScore(lead: PipelineLeadSnapshot, mode: PipelineAssistantMod
   }
 
   if (mode === 'close') {
-    if (lead.stage === 'Negociacao') return 14
-    if (lead.stage === 'Proposta') return 10
+    if (lead.stage === 'Proposta') return 14
     if (lead.stage === 'Apresentacao') return 6
     return 0
   }
 
   if (mode === 'attack') {
-    if (lead.stage === 'Negociacao') return 12
-    if (lead.stage === 'Proposta') return 10
+    if (lead.stage === 'Proposta') return 12
     if (lead.stage === 'Apresentacao') return 6
     if (lead.stage === 'Qualificacao') return 3
     return 0
   }
 
-  if (lead.stage === 'Negociacao') return 9
-  if (lead.stage === 'Proposta') return 7
+  if (lead.stage === 'Proposta') return 9
   if (lead.stage === 'Apresentacao') return 4
   return 0
 }
@@ -335,26 +329,24 @@ function getAssistantNextAction(lead: PipelineLeadSnapshot, mode: PipelineAssist
   }
 
   if (mode === 'risk') {
-    if (lead.stage === 'Negociacao') return 'Retome com urgência e valide a pendência principal.'
-    if (lead.stage === 'Proposta') return 'Revise a proposta e confirme a decisão ainda hoje.'
+    if (lead.stage === 'Proposta') return 'Retome com urgência e valide a pendência principal.'
     if (lead.stage === 'Apresentacao') return 'Reaqueça a conversa e destrave a próxima etapa.'
     return 'Reabra o contato com uma mensagem objetiva.'
   }
 
   if (mode === 'close') {
-    if (lead.stage === 'Negociacao') return 'Acelere a decisão com follow-up comercial direto.'
-    if (lead.stage === 'Proposta') return 'Apresente valor final e remova as objeções.'
+    if (lead.stage === 'Proposta') return 'Acelere a decisão com follow-up comercial direto.'
     return 'Avance a oportunidade para fase quente.'
   }
 
   if (mode === 'attack') {
-    if (lead.stage === 'Proposta' || lead.stage === 'Negociacao') return 'Faça contato agora e empurre para definição.'
+    if (lead.stage === 'Proposta') return 'Faça contato agora e empurre para definição.'
     if (lead.days >= 20) return 'Vale reacender o lead com abordagem objetiva.'
     return 'Confirme o interesse e a próxima janela de ação.'
   }
 
   if (mode === 'manager') {
-    if (lead.stage === 'Negociacao' || lead.stage === 'Proposta') return 'Apoie o consultor e destrave o avanço.'
+    if (lead.stage === 'Proposta') return 'Apoie o consultor e destrave o avanço.'
     return 'Revise contexto e confirme o próximo passo.'
   }
 
@@ -404,7 +396,7 @@ export function buildPipelineAssistantInsights(
       const stageScore = Math.round(getStageScore(lead.stage) * weights.stage) + getLeadBandScore(lead, mode)
       if (stageScore > 0) {
         score += stageScore
-        if (lead.stage === 'Proposta' || lead.stage === 'Negociacao') {
+        if (lead.stage === 'Proposta') {
           reasons.push(`fase quente em ${lead.stage.toLowerCase()}`)
         } else {
           reasons.push(`em ${lead.stage.toLowerCase()}`)
@@ -484,7 +476,7 @@ export function buildPipelineAssistantInsights(
       }
 
       if (mode === 'attack') {
-        if (lead.stage === 'Proposta' || lead.stage === 'Negociacao') {
+        if (lead.stage === 'Proposta') {
           reasons.push('boa para forca imediata')
         }
         if (lead.days >= 15) {
@@ -493,10 +485,8 @@ export function buildPipelineAssistantInsights(
       }
 
       if (mode === 'close') {
-        if (lead.stage === 'Negociacao') {
-          reasons.push('janela de fechamento aberta')
-        } else if (lead.stage === 'Proposta') {
-          reasons.push('pronta para fechamento assistido')
+        if (lead.stage === 'Proposta') {
+          reasons.push('janela de fechamento aberta, pronta para fechamento assistido')
         }
         if (freshness.isFresh) {
           reasons.push('analise IA recente apoia a decisao')
@@ -515,7 +505,7 @@ export function buildPipelineAssistantInsights(
         }
       }
 
-      if (mode === 'manager' && (lead.stage === 'Proposta' || lead.stage === 'Negociacao')) {
+      if (mode === 'manager' && (lead.stage === 'Proposta')) {
         reasons.push('impacto comercial relevante')
       }
 
@@ -570,3 +560,6 @@ export function buildPipelineAssistantInsights(
     totalActive: activeLeads.length,
   }
 }
+
+
+

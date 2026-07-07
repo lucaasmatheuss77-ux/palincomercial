@@ -82,13 +82,12 @@ describe('PipelineAssistantStage', () => {
     'Qualificacao',
     'Apresentacao',
     'Proposta',
-    'Negociacao',
     'Fechado',
     'Perdido',
   ]
 
   it('contém todos os 7 estágios do pipeline', () => {
-    expect(validStages).toHaveLength(7)
+    expect(validStages).toHaveLength(6)
   })
 
   validStages.forEach((stage) => {
@@ -132,8 +131,7 @@ function getLeadStageLocal(stage: string | null): PipelineAssistantStage {
   if (stage === 'Contato Inicial' || stage === 'Lead') return 'Contato Inicial'
   if (stage === 'Qualificacao' || stage === 'Qualificado') return 'Qualificacao'
   if (stage === 'Apresentacao' || stage === 'Diagnostico' || stage === 'Diagnóstico') return 'Apresentacao'
-  if (stage === 'Proposta') return 'Proposta'
-  if (stage === 'Negociacao' || stage === 'Negociação') return 'Negociacao'
+  if (stage === 'Proposta' || stage === 'Negociacao' || stage === 'Negociação') return 'Proposta'
   if (stage === 'Fechado') return 'Fechado'
   return 'Perdido'
 }
@@ -151,8 +149,8 @@ describe('getLeadStage — mapeamento de aliases de estágios', () => {
   it('"Diagnostico" (sem acento) mapeia para "Apresentacao"', () => {
     expect(getLeadStageLocal('Diagnostico')).toBe('Apresentacao')
   })
-  it('"Negociação" (com acento) mapeia para "Negociacao"', () => {
-    expect(getLeadStageLocal('Negociação')).toBe('Negociacao')
+  it('"Negociação" (com acento) mapeia para "Proposta"', () => {
+    expect(getLeadStageLocal('Negociação')).toBe('Proposta')
   })
   it('"Fechado" mapeia para "Fechado"', () => {
     expect(getLeadStageLocal('Fechado')).toBe('Fechado')

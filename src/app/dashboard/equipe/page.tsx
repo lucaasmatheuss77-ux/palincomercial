@@ -25,7 +25,7 @@ export default async function EquipePage() {
   const [members, products, leadsData, dealsData] = await Promise.all([
     listUsers(),
     supabase.from('products').select('id, name').order('name').then(r => r.data ?? []),
-    supabase.from('leads').select('consultant_id, stage').then(r => r.data ?? []),
+    supabase.from('leads').select('consultant_id, stage').limit(10000).then(r => r.data ?? []),
     supabase.from('deals').select('consultant_id').then(r => r.data ?? []),
   ])
 

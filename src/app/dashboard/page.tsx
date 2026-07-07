@@ -12,7 +12,7 @@ import DashboardClient, {
 
 export const dynamic = 'force-dynamic'
 
-const STAGES = ['Contato Inicial', 'Qualificacao', 'Apresentacao', 'Proposta', 'Negociacao']
+const STAGES = ['Contato Inicial', 'Qualificacao', 'Apresentacao', 'Proposta']
 const NORMALIZED_STAGE_MAP: Record<string, string> = {
   'Contato Inicial': 'Contato Inicial',
   Lead: 'Contato Inicial',
@@ -26,9 +26,9 @@ const NORMALIZED_STAGE_MAP: Record<string, string> = {
   'Reunião': 'Apresentacao',
   Reuniao: 'Apresentacao',
   Proposta: 'Proposta',
-  Negociacao: 'Negociacao',
-  'Negociação': 'Negociacao',
-  'Negociaçãão': 'Negociacao',
+  Negociacao: 'Proposta',
+  'Negociação': 'Proposta',
+  'Negociaçãão': 'Proposta',
   Fechado: 'Fechado',
   Ganho: 'Fechado',
   Venda: 'Fechado',
@@ -41,10 +41,10 @@ const NORMALIZED_STAGE_MAP: Record<string, string> = {
 type LeadRecord = {
   consultant_id?: string
   created_at?: string
-  estimated_value?: number | string
+  expected_value?: number | string
   id?: string
   name?: string
-  product?: { color?: string; name?: string } | null
+  product?: { category?: string | null; color?: string; name?: string } | null
   product_id?: string | null
   sub_product_id?: string | null
   stage?: string
@@ -87,7 +87,7 @@ function buildRecentActivity(leads: LeadRecord[]): ActivityData {
         return {
           tipo: 'Contrato fechado',
           desc: `${leadName} foi concluido com sucesso.`,
-          valor: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(Number(lead.estimated_value || 0)),
+          valor: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(Number(lead.expected_value || 0)),
           tempo,
           cor: '#10b981'
         }
@@ -106,7 +106,7 @@ function buildRecentActivity(leads: LeadRecord[]): ActivityData {
       return {
         tipo: 'Lead movimentado',
         desc: `${leadName} esta no estagio ${stage}.`,
-        valor: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(Number(lead.estimated_value || 0)),
+        valor: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(Number(lead.expected_value || 0)),
         tempo,
         cor: 'var(--brand-primary)'
       }
@@ -164,7 +164,7 @@ function buildRevenueData(closedDeals: LeadRecord[]): MonthlyData {
     const date = new Date(deal.created_at)
     const key = `${date.getFullYear()}-${date.getMonth()}`
     if (!revenueByMonth.has(key)) return
-    revenueByMonth.set(key, (revenueByMonth.get(key) || 0) + Number(deal.estimated_value || 0))
+    revenueByMonth.set(key, (revenueByMonth.get(key) || 0) + Number(deal.expected_value || 0))
   })
 
   return lastSixMonths.map(({ key, mes }) => ({
@@ -225,12 +225,15 @@ function getTopConsultant(team: ProfileRecord[], xpMap: Record<string, number>, 
   return ranking[0] || { name: 'Sem dados', xp: 0 }
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage(props: { searchParams: Promise<{ month?: string; year?: string }> }) {
+  const searchParams = await props.searchParams;
+  const filterMonth = searchParams.month;
+  const filterYear = searchParams.year;
   try {
     const supabase = await createClient()
 
     const [leadsResult, teamResult, xpLogsResult, aiResult, productsResult, subProductsResult, settingsResult, goalsResult] = await Promise.allSettled([
-      supabase.from('leads').select('*, product:products(name, color), sub_product:sub_products(name, id)'),
+      supabase.from('leads').select('*, product:products(name, category, color), sub_product:sub_products(name, id)').limit(10000),
       supabase.from('profiles').select('*'),
       supabase.from('xp_logs').select('profile_id, xp_amount'),
       supabase.from('ai_qualifications').select('lead_id, status, score'),
@@ -259,9 +262,9 @@ export default async function DashboardPage() {
       .filter(g => g.period === currentPeriod)
       .reduce((sum, g) => sum + (Number(g.goal_contracts) || 0), 0)
 
-    const CONTRACTS_META = activeGoalsTotal > 0 
-      ? activeGoalsTotal 
-      : Number(settingsMap.get('contracts_meta') ?? '54')
+    const CONTRACTS_META = activeGoalsTotal > 0
+      ? activeGoalsTotal
+      : 0
       
     const REVENUE_META = Number(settingsMap.get('revenue_meta') ?? '0')
 
@@ -275,7 +278,7 @@ export default async function DashboardPage() {
     const closedDeals = allLeads.filter((lead) => lead.stage === 'Fechado')
     const lostDeals = allLeads.filter((lead) => lead.stage === 'Perdido')
 
-    const revenue = closedDeals.reduce((sum, deal) => sum + Number(deal.estimated_value || 0), 0)
+    const revenue = closedDeals.reduce((sum, deal) => sum + Number(deal.expected_value || 0), 0)
     const contracts = closedDeals.length
     const totalLeads = allLeads.length
     const conversionRate = totalLeads > 0 ? (contracts / totalLeads) * 100 : 0
@@ -293,20 +296,32 @@ export default async function DashboardPage() {
 
     const eventClosedDeals = closedDeals.filter((deal) => deal.notes?.toLowerCase().includes('evento'))
     const eventsContracts = eventClosedDeals.length
-    const eventsRoi = eventClosedDeals.reduce((sum, deal) => sum + Number(deal.estimated_value || 0), 0)
+    const eventsRoi = eventClosedDeals.reduce((sum, deal) => sum + Number(deal.expected_value || 0), 0)
+
+    const mixLeads = allLeads.filter(lead => {
+      const isMixStage = lead.stage !== 'Fechado' && lead.stage !== 'Perdido';
+      if (!isMixStage) return false;
+      if (filterMonth && filterYear && lead.created_at) {
+        const d = new Date(lead.created_at);
+        if (d.getMonth() + 1 !== parseInt(filterMonth, 10) || d.getFullYear() !== parseInt(filterYear, 10)) {
+          return false;
+        }
+      }
+      return true;
+    });
 
     const productMap: Record<string, { value: number; color: string }> = {}
-    activeLeads.forEach((lead) => {
+    mixLeads.forEach((lead) => {
       const productName = lead.product?.name || 'Geral'
       const color = lead.product?.color || '#3b82f6'
       if (!productMap[productName]) productMap[productName] = { value: 0, color }
       productMap[productName].value += 1
     })
 
-    const totalActive = activeLeads.length || 1
+    const totalMixLeads = mixLeads.length || 1
     const productData: ProductData = Object.entries(productMap).map(([name, data]) => ({
       name,
-      value: Math.round((data.value / totalActive) * 100),
+      value: Math.round((data.value / totalMixLeads) * 100),
       color: data.color
     }))
 
@@ -357,7 +372,7 @@ export default async function DashboardPage() {
       if (!deal.created_at) return
       const d = new Date(deal.created_at)
       const key = `${d.getFullYear()}-${d.getMonth()}`
-      revenueByMonth[key] = (revenueByMonth[key] || 0) + Number(deal.estimated_value || 0)
+      revenueByMonth[key] = (revenueByMonth[key] || 0) + Number(deal.expected_value || 0)
     })
     const currentMonthRevenue = revenueByMonth[currentMonthKey] || 0
     const prevMonthRevenue = revenueByMonth[prevMonthKey] || 0
@@ -397,6 +412,7 @@ export default async function DashboardPage() {
       winRate,
       leadVelocity,
       lossRate,
+      lostDeals: lostDeals.length,
       averagePipelineDays,
       lateStageOpportunities,
       aiQualifiedLeads,
@@ -433,16 +449,16 @@ export default async function DashboardPage() {
     const lastDeal: LastDealData = lastClosedLead ? {
       leadName: lastClosedLead.name || 'Lead',
       consultantName: lastClosedLead.consultant_id ? (profileNameMap.get(lastClosedLead.consultant_id) || 'Equipe') : 'Equipe',
-      value: Number(lastClosedLead.estimated_value || 0),
+      value: Number(lastClosedLead.expected_value || 0),
       closedAt: lastClosedLead.created_at || null,
     } : null
 
-    const buildFocusData = (leadsSource: LeadRecord[], name: string, color: string, id: string) => {
+    const buildFocusData = (leadsSource: LeadRecord[], name: string, color: string, id: string, category = '') => {
       const pLeads = leadsSource
       const pActive = pLeads.filter((l) => l.stage !== 'Fechado' && l.stage !== 'Perdido')
       const pClosed = pLeads.filter((l) => l.stage === 'Fechado')
       const pLost = pLeads.filter((l) => l.stage === 'Perdido')
-      const pRevenue = pClosed.reduce((s, d) => s + Number(d.estimated_value || 0), 0)
+      const pRevenue = pClosed.reduce((s, d) => s + Number(d.expected_value || 0), 0)
       const pContracts = pClosed.length
       const pResolved = pContracts + pLost.length
       const pParticipation = totalLeads > 0 ? Math.round((pLeads.length / totalLeads) * 100) : 0
@@ -464,9 +480,21 @@ export default async function DashboardPage() {
 
       const pTop = getTopConsultant(allTeam, xpMap, pContractsMap)
 
+      const pStaleLeads = pActive.filter((l) => {
+        const createdAt = l.created_at ? new Date(l.created_at).getTime() : Date.now()
+        const daysStale = (Date.now() - createdAt) / (1000 * 60 * 60 * 24)
+        return daysStale > 3
+      }).map(l => ({
+        id: l.id || '',
+        name: l.name || 'Sem nome',
+        stage: l.stage || '',
+        days_stale: Math.floor((Date.now() - (l.created_at ? new Date(l.created_at).getTime() : Date.now())) / (1000 * 60 * 60 * 24))
+      })).sort((a, b) => b.days_stale - a.days_stale)
+
       return {
         id,
         name,
+        category,
         color,
         participation: pParticipation,
         contractsMeta: pMeta,
@@ -485,6 +513,7 @@ export default async function DashboardPage() {
           winRate: pResolved > 0 ? (pContracts / pResolved) * 100 : 0,
           leadVelocity: 0, // Simplified for focus mode
           lossRate: pResolved > 0 ? (pLost.length / pResolved) * 100 : 0,
+          lostDeals: pLost.length,
           averagePipelineDays: getAveragePipelineDays(pActive),
           lateStageOpportunities: getLateStageOpportunities(pActive),
           aiQualifiedLeads: pAiQualified,
@@ -495,7 +524,8 @@ export default async function DashboardPage() {
         },
         pipelineData: getPipelineData(pActive),
         revenueData: buildRevenueData(pClosed),
-        recentActivity: buildRecentActivity(pLeads)
+        recentActivity: buildRecentActivity(pLeads),
+        staleLeads: pStaleLeads
       }
     }
 
@@ -503,15 +533,29 @@ export default async function DashboardPage() {
     
     // Process Products
     dbProducts.forEach(prod => {
-      const prodLeads = allLeads.filter(l => l.product_id === prod.id)
-      productFocusData.push(buildFocusData(prodLeads, prod.name, prod.color, prod.id))
+      const prodLeads = allLeads.filter(l => {
+        if (l.product_id !== prod.id) return false;
+        if (filterMonth && filterYear && l.created_at) {
+          const d = new Date(l.created_at);
+          if (d.getMonth() + 1 !== parseInt(filterMonth as string, 10) || d.getFullYear() !== parseInt(filterYear as string, 10)) return false;
+        }
+        return true;
+      });
+      productFocusData.push(buildFocusData(prodLeads, prod.name, prod.color, prod.id, prod.category || ''))
       
       // Process Sub-products for this product
       const subProds = dbSubProducts.filter(s => s.product_id === prod.id)
       subProds.forEach(sub => {
-        const subLeads = allLeads.filter(l => l.sub_product_id === sub.id)
+        const subLeads = allLeads.filter(l => {
+          if (l.sub_product_id !== sub.id) return false;
+          if (filterMonth && filterYear && l.created_at) {
+            const d = new Date(l.created_at);
+            if (d.getMonth() + 1 !== parseInt(filterMonth as string, 10) || d.getFullYear() !== parseInt(filterYear as string, 10)) return false;
+          }
+          return true;
+        });
         if (subLeads.length > 0) {
-          productFocusData.push(buildFocusData(subLeads, `> ${sub.name}`, prod.color, sub.id))
+          productFocusData.push(buildFocusData(subLeads, `> ${sub.name}`, prod.color, sub.id, prod.category || ''))
         }
       })
     })
@@ -548,6 +592,7 @@ export default async function DashboardPage() {
           winRate: 0,
           leadVelocity: 0,
           lossRate: 0,
+          lostDeals: 0,
           averagePipelineDays: 0,
           lateStageOpportunities: 0,
           aiQualifiedLeads: 0,

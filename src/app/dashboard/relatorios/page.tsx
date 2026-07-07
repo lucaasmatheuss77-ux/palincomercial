@@ -26,7 +26,8 @@ export default async function RelatoriosPage() {
   ] = await Promise.all([
     supabase
       .from('leads')
-      .select('id, stage, estimated_value, created_at, consultant_id, product:products(name)'),
+      .select('id, stage, expected_value, created_at, consultant_id, product:products(name)')
+      .limit(10000),
     supabase
       .from('profiles')
       .select('id, full_name, role'),
@@ -41,7 +42,7 @@ export default async function RelatoriosPage() {
   const leads = (leadsData || []) as unknown as Array<{
     id: string
     stage: string
-    estimated_value: number | string | null
+    expected_value: number | string | null
     created_at: string
     consultant_id: string | null
     product: { name: string } | null
@@ -65,7 +66,7 @@ export default async function RelatoriosPage() {
     return {
       mes: label,
       contratos: closed.length,
-      receita: closed.reduce((sum, l) => sum + Number(l.estimated_value ?? 0), 0),
+      receita: closed.reduce((sum, l) => sum + Number(l.expected_value ?? 0), 0),
       taxa: total > 0 ? Math.round((closed.length / total) * 1000) / 10 : 0,
     }
   })
@@ -80,7 +81,7 @@ export default async function RelatoriosPage() {
     'Consultor;Cargo;Contratos;Receita (R$)',
     ...profiles.map((p) => {
       const mine = closedLeads.filter((l) => l.consultant_id === p.id)
-      const revenue = mine.reduce((sum, l) => sum + Number(l.estimated_value ?? 0), 0)
+      const revenue = mine.reduce((sum, l) => sum + Number(l.expected_value ?? 0), 0)
       return `${p.full_name ?? 'Sem nome'};${p.role ?? ''};${mine.length};${revenue.toFixed(2)}`
     }),
   ].join('\n')
@@ -90,7 +91,7 @@ export default async function RelatoriosPage() {
     'Produto;Contratos;Receita (R$)',
     ...products.map((prod) => {
       const mine = closedLeads.filter((l) => l.product?.name === prod.name)
-      const revenue = mine.reduce((sum, l) => sum + Number(l.estimated_value ?? 0), 0)
+      const revenue = mine.reduce((sum, l) => sum + Number(l.expected_value ?? 0), 0)
       return `${prod.name};${mine.length};${revenue.toFixed(2)}`
     }),
   ].join('\n')

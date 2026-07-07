@@ -15,51 +15,47 @@ async function getConfetti() {
 }
 
 /**
- * triggerSaleConfetti — Explosão épica de confetes para fechamento de venda.
- * Agora mais rápida (2.5s) e suporta temas rurais.
+ * triggerSaleConfetti — Explosão ÉPICA (Gigante) de confetes para fechamento de contrato!
+ * Uma festa muito maior e mais longa para celebrar a assinatura de contrato.
  */
 export async function triggerSaleConfetti(isRural = false) {
   const confetti = await getConfetti()
   if (!confetti) return
 
-  const duration = 2500 // Reduzido de 4s para 2.5s
+  const duration = 5000 // Aumentado para 5s de festa
   const end = Date.now() + duration
 
   const colors = isRural 
     ? ['#78350f', '#fbbf24', '#10b981', '#ffffff', '#a8922e'] // Tons terra/ouro/campo
-    : ['#fbbf24', '#fcd34d', '#f59e0b', '#ffffff', '#10b981', '#34d399']
+    : ['#fbbf24', '#fcd34d', '#f59e0b', '#ffffff', '#10b981', '#34d399', '#3b82f6', '#ef4444']
 
-  // Se for rural, adiciona formas de chapéu e botina (via emojis)
-  const scalar = isRural ? 2.5 : 1.2
-  // Nota: canvas-confetti suporta emojis via "scalar" alto e renderização custom se necessário, 
-  // mas a forma mais fácil é misturar confetes normais com partículas grandes que lembram o tema.
-  // No v1.6+ podemos usar text as shape.
+  const scalar = isRural ? 2.5 : 1.5
 
   const common = {
     colors,
     zIndex: 100000,
-    gravity: 1.1,
+    gravity: 0.9, // Cai mais devagar
     scalar,
   }
 
-  // Chuva central imediata
+  // 1. Explosão inicial gigante do centro
   confetti({
     ...common,
-    particleCount: 150,
-    spread: 100,
-    origin: { x: 0.5, y: 0.3 },
-    startVelocity: 55,
+    particleCount: 250,
+    spread: 160,
+    origin: { x: 0.5, y: 0.4 },
+    startVelocity: 65,
   })
 
-  // Se rural, lança "chapéus" e "botinas"
+  // Se for rural, adiciona formas de chapéu e botina (via emojis)
   if (isRural) {
-    const ruralShapes = ['🤠', '👢', '🚜', '🌾']
+    const ruralShapes = ['🤠', '🚜', '🌾', '🐂']
     ruralShapes.forEach((emoji, i) => {
       setTimeout(() => {
         confetti({
           ...common,
-          particleCount: 15,
-          scalar: 4,
+          particleCount: 25,
+          scalar: 5,
           shapes: [confetti.shapeFromText({ text: emoji })],
           origin: { x: Math.random(), y: 0.5 },
         })
@@ -67,69 +63,103 @@ export async function triggerSaleConfetti(isRural = false) {
     })
   }
 
-  // Explosão nos cantos após 100ms
-  setTimeout(() => {
+  // 2. Canhões laterais sincronizados a cada 400ms
+  const interval = setInterval(() => {
+    if (Date.now() > end) {
+      clearInterval(interval)
+      return
+    }
     confetti({
       ...common,
       particleCount: 80,
       angle: 60,
       spread: 80,
-      origin: { x: 0, y: 0.6 },
+      origin: { x: 0, y: 0.7 },
+      startVelocity: 60,
     })
     confetti({
       ...common,
       particleCount: 80,
       angle: 120,
       spread: 80,
-      origin: { x: 1, y: 0.6 },
+      origin: { x: 1, y: 0.7 },
+      startVelocity: 60,
     })
-  }, 100)
+  }, 400)
 
-  // Chuva contínua mais curta
+  // 3. Chuva contínua caindo do topo
   const frame = () => {
     if (Date.now() > end) return
 
-    const timeLeft = end - Date.now()
-    const count = Math.floor(40 * (timeLeft / duration))
-
     confetti({
       ...common,
-      particleCount: count,
-      angle: 60,
-      spread: 55,
-      origin: { x: 0, y: 0.65 },
-    })
-    confetti({
-      ...common,
-      particleCount: count,
-      angle: 120,
-      spread: 55,
-      origin: { x: 1, y: 0.65 },
+      particleCount: 6,
+      angle: 90,
+      spread: 180,
+      origin: { x: Math.random(), y: -0.1 },
+      startVelocity: 15,
+      gravity: 0.8
     })
 
     requestAnimationFrame(frame)
   }
 
-  setTimeout(frame, 300)
+  setTimeout(frame, 200)
 }
 
 /**
- * triggerSingleBoom — Micro-explosão dourada para avanço de etapa.
- * Mais rápido e discreto que o confetti de fechamento.
+ * triggerSingleBoom — Chuva de papel padrão (como era antes) para cada avanço de etapa.
  */
 export async function triggerSingleBoom() {
   const confetti = await getConfetti()
   if (!confetti) return
 
-  confetti({
-    particleCount: 60,
-    spread: 70,
-    origin: { x: 0.5, y: 0.6 },
+  const duration = 1200 // 1.2s (Mais curto e discreto)
+  const end = Date.now() + duration
+  const colors = ['#fbbf24', '#fcd34d', '#f59e0b', '#ffffff']
+
+  const common = {
+    colors,
     zIndex: 100000,
-    ticks: 130,
-    gravity: 1.3,
-    colors: ['#fbbf24', '#fcd34d', '#ffffff', '#a8922e'],
+    gravity: 1.2,
+    scalar: 0.9,
+  }
+
+  // Explosão central menor
+  confetti({
+    ...common,
+    particleCount: 40,
+    spread: 60,
+    origin: { x: 0.5, y: 0.5 },
     startVelocity: 35,
-    scalar: 1.0,
   })
+
+  // Chuva contínua bem leve
+  const frame = () => {
+    if (Date.now() > end) return
+
+    const timeLeft = end - Date.now()
+    const count = Math.floor(10 * (timeLeft / duration))
+
+    if (count > 0) {
+      confetti({
+        ...common,
+        particleCount: count,
+        angle: 60,
+        spread: 45,
+        origin: { x: 0, y: 0.6 },
+      })
+      confetti({
+        ...common,
+        particleCount: count,
+        angle: 120,
+        spread: 45,
+        origin: { x: 1, y: 0.6 },
+      })
+    }
+
+    requestAnimationFrame(frame)
+  }
+
+  setTimeout(frame, 150)
 }

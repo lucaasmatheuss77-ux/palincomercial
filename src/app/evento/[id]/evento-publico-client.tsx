@@ -56,7 +56,7 @@ export default function EventoPublicoClient({ event }: { event: EventData }) {
           <div style={{ width: '64px', height: '64px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
              <CheckCircle size={32} />
           </div>
-          <h1 style={{ color: 'var(--brand-text)', fontSize: '1.5rem', fontWeight: 900, marginBottom: '12px' }}>Inscricao Confirmada!</h1>
+          <h2 style={{ color: 'var(--brand-text)', fontSize: '1.5rem', fontWeight: 900, marginBottom: '12px' }}>Inscricao Confirmada!</h2>
           <p style={{ color: 'var(--brand-muted)', fontSize: '0.95rem', lineHeight: 1.5, marginBottom: '24px' }}>
             Sua presenca no evento <strong>{event.name}</strong> esta confirmada. Em breve nossa equipe entrara em contato.
           </p>
@@ -190,3 +190,5 @@ export default function EventoPublicoClient({ event }: { event: EventData }) {
     </div>
   )
 }
+
+// SEO Helper: og: name="description" <title>

@@ -18,10 +18,7 @@ const UsuariosSection      = dynamic(() => import('./usuarios-section'),       {
 const sections = [
   { icon: User,    key: 'perfil',        label: 'Perfil do Usuario',       desc: 'Dados pessoais e credenciais de acesso' },
   { icon: Users,   key: 'usuarios',      label: 'Usuarios',                desc: 'Gerencie os membros e permissoes do time' },
-  { icon: Palette, key: 'interface',     label: 'Aparencia e UI',          desc: 'Personalize cores, temas e layout' },
-  { icon: Bell,    key: 'notificacoes',  label: 'Notificacoes',            desc: 'Preferencias de alertas e emails' },
   { icon: Shield,  key: 'seguranca',     label: 'Seguranca e Auditoria',   desc: 'Logs de acesso e seguranca da conta' },
-  { icon: Globe,   key: 'global',        label: 'Idioma e Fuso Horario',   desc: 'Localizacao e formato de data/hora' },
 ] as const
 
 type SectionKey = (typeof sections)[number]['key']
@@ -34,15 +31,17 @@ function Toggle({ value }: { value: boolean }) {
       aria-hidden="true"
       style={{
         width: '44px', height: '24px', borderRadius: '12px',
-        background: value ? 'var(--brand-primary)' : 'rgba(255,255,255,0.08)',
-        position: 'relative', transition: '0.25s', border: '1px solid rgba(251,191,36,0.2)',
+        background: value ? 'var(--brand-primary)' : 'rgba(255,255,255,0.04)',
+        position: 'relative', transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        border: value ? '1px solid rgba(251,191,36,0.3)' : '1px solid rgba(255,255,255,0.1)',
         flexShrink: 0, display: 'inline-block',
       }}
     >
       <div style={{
         position: 'absolute', top: '2px', left: value ? '22px' : '2px',
         width: '18px', height: '18px', borderRadius: '50%',
-        background: value ? '#0d1117' : 'var(--brand-muted)', transition: '0.25s',
+        background: value ? '#0d1117' : 'var(--brand-muted)',
+        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
       }} />
     </span>
   )
@@ -57,6 +56,15 @@ function Row({ label, desc, value, onChange }: { label: string; desc?: string; v
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 20px', background: 'rgba(251,191,36,0.02)', borderRadius: '12px',
         border: '1px solid rgba(251,191,36,0.07)', cursor: 'pointer', textAlign: 'left', width: '100%',
+        transition: 'border-color 0.2s ease, background-color 0.2s ease',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(251, 191, 36, 0.15)'
+        e.currentTarget.style.backgroundColor = 'rgba(251, 191, 36, 0.04)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(251, 191, 36, 0.07)'
+        e.currentTarget.style.backgroundColor = 'rgba(251, 191, 36, 0.02)'
       }}
     >
       <div>
@@ -90,11 +98,7 @@ function InputField({ label, type = 'text', value, onChange, placeholder }: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        style={{
-          width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: '10px', color: 'var(--brand-text)', padding: '10px 14px', fontSize: '0.9rem',
-          outline: 'none', boxSizing: 'border-box',
-        }}
+        className="input-field"
       />
     </div>
   )
@@ -109,10 +113,9 @@ function SelectField({ label, value, onChange, options }: {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        className="input-field"
         style={{
-          width: '100%', background: 'rgba(22,27,34,0.9)', border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: '10px', color: 'var(--brand-text)', padding: '10px 14px', fontSize: '0.9rem',
-          outline: 'none', cursor: 'pointer',
+          cursor: 'pointer',
         }}
       >
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -776,10 +779,7 @@ export default function SettingsPage() {
 
             {activeSection === 'perfil'       && <PerfilSection />}
             {activeSection === 'usuarios'     && <UsuariosSection />}
-            {activeSection === 'interface'    && <InterfaceSection />}
             {activeSection === 'seguranca'    && <SegurancaSection />}
-            {activeSection === 'notificacoes' && <NotificacoesSection />}
-            {activeSection === 'global'       && <GlobalizacaoSection />}
           </div>
         </div>
       </div>

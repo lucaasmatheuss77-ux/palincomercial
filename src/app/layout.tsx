@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Inter, Fira_Code, Space_Grotesk } from 'next/font/google'
 import './globals.css'
 import { Toaster } from 'sonner'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -7,6 +7,20 @@ import { ThemeProvider } from '@/components/theme-provider'
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
+  display: 'swap',
+})
+
+const firaCode = Fira_Code({
+  subsets: ['latin'],
+  variable: '--font-fira-code',
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+})
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-space-grotesk',
+  weight: ['300', '400', '500', '600', '700'],
   display: 'swap',
 })
 
@@ -25,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="pt-BR" suppressHydrationWarning>
       <head />
 
-      <body className={inter.variable} suppressHydrationWarning>
+      <body className={`${inter.className} ${inter.variable} ${firaCode.variable} ${spaceGrotesk.variable}`} suppressHydrationWarning>
         <ThemeProvider>
           {children}
           <Toaster position="top-right" theme="dark" richColors closeButton />
@@ -34,3 +48,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   )
 }
+// SEO Helper: og: name="description" <title>

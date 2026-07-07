@@ -13,7 +13,7 @@ export default async function ProcessoPage() {
     { count: nextContactsCount },
     { count: followUpsOpen },
   ] = await Promise.all([
-    supabase.from('leads').select('id, stage'),
+    supabase.from('leads').select('id, stage').limit(10000),
     supabase.from('contracts').select('id, status'),
     supabase.from('clientes').select('id, status_cliente'),
     supabase.from('meetings').select('id', { count: 'exact', head: true }),

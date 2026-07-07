@@ -3,12 +3,11 @@
 import { useState } from 'react'
 import { 
   Package, Plus, Trash2, DollarSign, Tags,
-  FileText, Zap, Shield, Search, RefreshCw,
+  Shield, Search, RefreshCw,
   Tractor, Briefcase, Landmark, Handshake, Calculator
 } from 'lucide-react'
 import { toast } from 'sonner'
 import ActionDialog from '@/components/action-dialog'
-import InsiderLogo from '@/components/insider-logo'
 
 type ProductCost = {
   id: string
@@ -29,22 +28,29 @@ type Product = {
   active: boolean
 }
 
-const CATEGORIES = [
-  'Compliance',
-  'Consultoria',
-  'Educacional',
-  'Fiscal & Tributário',
-  'ICMS',
-  'ICMS & Créditos',
-  'Jurídico',
-  'NR1',
-  'Parceria',
-  'Produtor Rural (PF)',
-  'Tributário',
-  'Tributos Federais',
+const DASHBOARD_CATEGORIES = [
+  { value: 'Tributário', label: 'Tributário', color: '#eab308', description: 'ICMS, créditos, fiscal e teses tributárias' },
+  { value: 'Educacional', label: 'Educacional', color: '#38bdf8', description: 'Cursos, treinamentos, palestras e mentorias' },
+  { value: 'Integramente', label: 'Integramente', color: '#c084fc', description: 'NR1, saúde mental, psicológico e bem-estar' },
+  { value: 'Rural', label: 'Rural', color: '#22c55e', description: 'Agro, produtor rural e oportunidades do campo' },
+  { value: 'Tecnologia', label: 'Tecnologia', color: '#06b6d4', description: 'Sistemas, automação, dados e IA' },
 ]
 
 const COST_TYPES = ['Operacional', 'Captação', 'Fixo', 'Variável', 'Outro']
+
+function normalizeProductCategory(category?: string | null) {
+  const normalized = (category || '').toLowerCase()
+  if (normalized.includes('educ')) return 'Educacional'
+  if (normalized.includes('integr') || normalized.includes('saude') || normalized.includes('saúde') || normalized.includes('mental') || normalized.includes('nr1')) return 'Integramente'
+  if (normalized.includes('rural') || normalized.includes('agro') || normalized.includes('produtor')) return 'Rural'
+  if (normalized.includes('tec') || normalized.includes('sistema') || normalized.includes('software') || normalized.includes('dados') || normalized.includes('autom')) return 'Tecnologia'
+  return 'Tributário'
+}
+
+function getCategoryConfig(category?: string | null) {
+  const normalized = normalizeProductCategory(category)
+  return DASHBOARD_CATEGORIES.find((item) => item.value === normalized) || DASHBOARD_CATEGORIES[0]
+}
 
 function getProductIcon(name: string) {
   const n = name.toLowerCase()
@@ -57,20 +63,6 @@ function getProductIcon(name: string) {
   if (n.includes('parceria')) return Handshake
   if (n.includes('intermediação')) return Briefcase
   return Package
-}
-
-function getProductColor(name: string) {
-  const n = name.toLowerCase()
-  if (n.includes('icms')) return '#38bdf8'
-  if (n.includes('pis') || n.includes('cat 83')) return '#fb7185'
-  if (n.includes('rural')) return '#10b981'
-  if (n.includes('compliance')) return '#f59e0b'
-  if (n.includes('consulta') || n.includes('análise')) return '#a855f7'
-  if (n.includes('transferência') || n.includes('cessão')) return '#6366f1'
-  if (n.includes('crédito') || n.includes('credito')) return '#2dd4bf'
-  if (n.includes('parceria')) return '#f43f5e'
-  if (n.includes('intermediação')) return '#8b5cf6'
-  return '#adbac7'
 }
 
 export default function ProdutosClient({ initialProducts }: { initialProducts: Product[] }) {
@@ -87,7 +79,7 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
 
   async function handleCreateProduct() {
     if (!draft.name.trim() || !draft.desc.trim()) {
-      toast.error('Informe nome e descrição.')
+      toast.error('Informe nome e descricao.')
       return
     }
 
@@ -101,26 +93,27 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
       }),
     })
 
-    if (res.ok) {
-      const created = await res.json()
+    const created = await res.json().catch(() => null)
+
+    if (res.ok && created) {
       setProducts((prev) => [
         {
           id: created.id,
-          name: draft.name.trim(),
-          slug: '',
-          emoji: '📦',
-          color: '#58a6ff',
-          description: draft.desc.trim(),
-          category: draft.category,
-          active: true,
+          name: created.name || draft.name.trim(),
+          slug: created.slug || '',
+          emoji: created.emoji || '📦',
+          color: created.color || '#58a6ff',
+          description: created.description || draft.desc.trim(),
+          category: created.category || draft.category,
+          active: created.active ?? true,
         },
-        ...prev,
-      ])
+        ...prev.filter((product) => product.id !== created.id),
+      ].sort((left, right) => left.name.localeCompare(right.name)))
       toast.success('Produto criado com sucesso.')
       setDraft({ name: '', desc: '', category: 'Tributário' })
       setShowNewProduct(false)
     } else {
-      toast.error('Erro ao criar produto.')
+      toast.error(created?.error || 'Erro ao criar produto.')
     }
   }
 
@@ -156,7 +149,7 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
     setDraft({
       name: product.name,
       desc: product.description,
-      category: product.category,
+      category: normalizeProductCategory(product.category),
     })
   }
 
@@ -223,13 +216,52 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(value)
   }
 
+  function CategoryPicker() {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
+        {DASHBOARD_CATEGORIES.map((category) => {
+          const active = draft.category === category.value
+          return (
+            <button
+              key={category.value}
+              type="button"
+              onClick={() => setDraft((current) => ({ ...current, category: category.value }))}
+              style={{
+                border: `1px solid ${active ? category.color : 'rgba(255,255,255,0.09)'}`,
+                borderRadius: '8px',
+                background: active ? `${category.color}18` : 'rgba(255,255,255,0.025)',
+                color: 'var(--brand-text)',
+                cursor: 'pointer',
+                minHeight: '86px',
+                padding: '12px',
+                textAlign: 'left',
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 900, fontSize: '0.86rem' }}>
+                <i style={{ width: 9, height: 9, borderRadius: 999, background: category.color, display: 'inline-block' }} />
+                {category.label}
+              </span>
+              <small style={{ display: 'block', marginTop: '8px', color: 'var(--brand-muted)', fontSize: '0.72rem', lineHeight: 1.35 }}>
+                {category.description}
+              </small>
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
   // Group products by category
-  const byCategory = products.reduce<Record<string, Product[]>>((acc, p) => {
-    const cat = p.category || 'Sem categoria'
+  const productsByCategory = products.reduce<Record<string, Product[]>>((acc, p) => {
+    const cat = normalizeProductCategory(p.category)
     if (!acc[cat]) acc[cat] = []
     acc[cat].push(p)
     return acc
   }, {})
+  const categoryStats = DASHBOARD_CATEGORIES.map((category) => ({
+    ...category,
+    total: productsByCategory[category.value]?.length || 0,
+  }))
 
   return (
     <div style={{ display: 'grid', gap: '24px' }}>
@@ -238,7 +270,7 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
         <div>
           <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--brand-text)', letterSpacing: '-0.02em' }}>Produtos</h1>
           <p style={{ color: 'var(--brand-muted)', fontSize: '0.84rem', marginTop: '4px' }}>
-            {products.length} {products.length === 1 ? 'produto' : 'produtos'} · {Object.keys(byCategory).length} categorias
+            {products.length} {products.length === 1 ? 'produto' : 'produtos'} · 5 focos do dashboard
           </p>
         </div>
         <button type="button" className="btn-primary" onClick={() => setShowNewProduct(true)}>
@@ -247,18 +279,40 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
         </button>
       </div>
 
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
+        {categoryStats.map((category) => (
+          <div
+            key={category.value}
+            className="glass-card"
+            style={{
+              borderColor: `${category.color}35`,
+              display: 'grid',
+              gap: '8px',
+              padding: '14px',
+            }}
+          >
+            <span style={{ color: category.color, fontWeight: 900, fontSize: '0.78rem', textTransform: 'uppercase' }}>{category.label}</span>
+            <strong style={{ color: 'var(--brand-text)', fontSize: '1.6rem', lineHeight: 1 }}>{category.total}</strong>
+            <small style={{ color: 'var(--brand-muted)', fontSize: '0.72rem' }}>{category.description}</small>
+          </div>
+        ))}
+      </section>
+
       {/* Products by category */}
-      {Object.keys(byCategory).length === 0 ? (
+      {products.length === 0 ? (
         <div className="glass-card" style={{ padding: '40px', textAlign: 'center', color: 'var(--brand-muted)' }}>
           Nenhum produto cadastrado ainda. Clique em &quot;Novo produto&quot; para começar.
         </div>
       ) : (
-        Object.entries(byCategory).map(([category, categoryProducts]) => (
-          <section key={category}>
+        DASHBOARD_CATEGORIES.map((categoryConfig) => {
+          const categoryProducts = productsByCategory[categoryConfig.value] || []
+          if (categoryProducts.length === 0) return null
+          return (
+          <section key={categoryConfig.value}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-              <Tags size={14} color="var(--brand-muted)" />
-              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--brand-muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                {category}
+              <Tags size={14} color={categoryConfig.color} />
+              <span style={{ fontSize: '0.72rem', fontWeight: 900, color: categoryConfig.color, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                {categoryConfig.label}
               </span>
               <span style={{ fontSize: '0.72rem', color: '#4b5563', fontWeight: 600 }}>
                 — {categoryProducts.length} {categoryProducts.length === 1 ? 'produto' : 'produtos'}
@@ -272,7 +326,7 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                   className="glass-card"
                   style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
                 >
-                  <div style={{ height: '3px', background: `linear-gradient(90deg, ${getProductColor(product.name)}, transparent)` }} />
+                  <div style={{ height: '3px', background: `linear-gradient(90deg, ${getCategoryConfig(product.category).color}, transparent)` }} />
                   <div style={{ padding: '18px 20px 16px', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
                     {/* Product header */}
@@ -280,8 +334,8 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                       <span style={{
                         width: '42px', height: '42px', borderRadius: '12px',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        background: `${getProductColor(product.name)}18`, border: `1px solid ${getProductColor(product.name)}30`,
-                        flexShrink: 0, color: getProductColor(product.name)
+                        background: `${getCategoryConfig(product.category).color}18`, border: `1px solid ${getCategoryConfig(product.category).color}30`,
+                        flexShrink: 0, color: getCategoryConfig(product.category).color
                       }}>
                         {(() => {
                            const IconComponent = getProductIcon(product.name)
@@ -299,11 +353,11 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: '5px',
                         padding: '4px 10px', borderRadius: '999px',
-                        background: `${getProductColor(product.name)}12`, border: `1px solid ${getProductColor(product.name)}25`,
-                        color: getProductColor(product.name), fontSize: '0.7rem', fontWeight: 700,
+                        background: `${getCategoryConfig(product.category).color}12`, border: `1px solid ${getCategoryConfig(product.category).color}25`,
+                        color: getCategoryConfig(product.category).color, fontSize: '0.7rem', fontWeight: 700,
                       }}>
                         <Tags size={10} />
-                        {product.category || 'Sem categoria'}
+                        {normalizeProductCategory(product.category)}
                       </span>
                     </div>
 
@@ -312,7 +366,7 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                       <button
                         type="button"
                         className="btn-ghost"
-                        style={{ flex: 1, justifyContent: 'center', fontSize: '0.76rem' }}
+                        style={{ flex: 1, justifyContent: 'center', fontSize: '0.76rem', padding: '8px 12px' }}
                         onClick={() => openEdit(product)}
                       >
                         <Package size={13} color="var(--brand-primary)" opacity={0.8} />
@@ -321,7 +375,7 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                       <button
                         type="button"
                         className="btn-ghost"
-                        style={{ flex: 1, justifyContent: 'center', fontSize: '0.76rem' }}
+                        style={{ flex: 1, justifyContent: 'center', fontSize: '0.76rem', padding: '8px 12px' }}
                         onClick={() => openCosts(product)}
                       >
                         <DollarSign size={13} />
@@ -329,12 +383,12 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
                       </button>
                       <button
                         type="button"
-                        className="btn-ghost"
-                        style={{ flex: 1, justifyContent: 'center', fontSize: '0.76rem' }}
+                        className="btn-ghost btn-danger-ghost"
+                        style={{ flex: 1, justifyContent: 'center', fontSize: '0.76rem', padding: '8px 12px' }}
                         onClick={() => setConfirmDelete(product)}
                       >
-                        <Trash2 size={13} color="#ef4444" />
-                        <span style={{ color: '#ef4444' }}>Excluir</span>
+                        <Trash2 size={13} />
+                        <span>Excluir</span>
                       </button>
                     </div>
                   </div>
@@ -342,14 +396,15 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
               ))}
             </div>
           </section>
-        ))
+          )
+        })
       )}
 
       {/* ── DIALOG: Novo produto ── */}
       <ActionDialog
         open={showNewProduct}
         title="Novo produto"
-        subtitle="Adicione um produto ao catálogo com nome, descrição e categoria."
+        subtitle="Cadastre somente o que define o produto: nome, categoria e objetivo comercial."
         onClose={() => { setShowNewProduct(false); setDraft({ name: '', desc: '', category: 'Tributário' }) }}
         footer={
           <>
@@ -358,42 +413,30 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
           </>
         }
       >
-        <div style={{ display: 'grid', gap: '16px' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>
-              Nome *
-            </label>
+        <div className="clean-form">
+          <section className="clean-form-section">
+            <label>
+              Nome do produto
             <input
               className="input-field"
               value={draft.name}
               onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))}
-              placeholder="Ex: Compliance Tributário"
             />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>
-              Descrição *
             </label>
+            <label>
+              Descrição comercial
             <textarea
               className="input-field"
               rows={3}
               value={draft.desc}
               onChange={(e) => setDraft((s) => ({ ...s, desc: e.target.value }))}
-              placeholder="Foco comercial do produto"
             />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>
-              Categoria *
             </label>
-            <select
-              className="input-field"
-              value={draft.category}
-              onChange={(e) => setDraft((s) => ({ ...s, category: e.target.value }))}
-            >
-              {CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
-            </select>
-          </div>
+            <label>
+              Categoria
+              <CategoryPicker />
+            </label>
+          </section>
         </div>
       </ActionDialog>
 
@@ -401,7 +444,7 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
       <ActionDialog
         open={Boolean(editingProduct)}
         title="Editar produto"
-        subtitle="Atualize as informações do produto no catálogo."
+        subtitle="Atualize os dados essenciais do produto."
         onClose={() => { setEditingProduct(null); setDraft({ name: '', desc: '', category: 'Tributário' }) }}
         footer={
           <>
@@ -410,42 +453,30 @@ export default function ProdutosClient({ initialProducts }: { initialProducts: P
           </>
         }
       >
-        <div style={{ display: 'grid', gap: '16px' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>
-              Nome *
-            </label>
+        <div className="clean-form">
+          <section className="clean-form-section">
+            <label>
+              Nome do produto
             <input
               className="input-field"
               value={draft.name}
               onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))}
-              placeholder="Ex: Compliance Tributário"
             />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>
-              Descrição *
             </label>
+            <label>
+              Descrição comercial
             <textarea
               className="input-field"
               rows={3}
               value={draft.desc}
               onChange={(e) => setDraft((s) => ({ ...s, desc: e.target.value }))}
-              placeholder="Foco comercial do produto"
             />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>
-              Categoria *
             </label>
-            <select
-              className="input-field"
-              value={draft.category}
-              onChange={(e) => setDraft((s) => ({ ...s, category: e.target.value }))}
-            >
-              {CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
-            </select>
-          </div>
+            <label>
+              Categoria
+              <CategoryPicker />
+            </label>
+          </section>
         </div>
       </ActionDialog>
 

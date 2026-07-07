@@ -62,18 +62,37 @@ export async function createEvent(data: {
 export async function getEvents() {
   const { createClient } = await import('@/lib/supabase/server')
   const supabase = await createClient()
+
+  const baseSelect = `
+    *,
+    products (name)
+  `
+
   const { data: events, error } = await supabase
     .from('events')
-    .select(`
-      *,
-      event_participants (count),
-      products (name)
-    `)
+    .select(baseSelect)
     .order('date', { ascending: false })
 
   if (error) {
-    console.error('Erro ao buscar eventos:', error)
+    console.warn('Eventos indisponiveis:', error.message)
     return []
+  }
+
+  const eventIds = (events || []).map((event) => event.id).filter(Boolean)
+  let participantCountByEvent = new Map<string, number>()
+
+  if (eventIds.length > 0) {
+    const { data: participants, error: participantsError } = await supabase
+      .from('event_participants')
+      .select('event_id')
+      .in('event_id', eventIds)
+
+    if (!participantsError) {
+      participantCountByEvent = (participants || []).reduce((acc, row: { event_id?: string | null }) => {
+        if (row.event_id) acc.set(row.event_id, (acc.get(row.event_id) || 0) + 1)
+        return acc
+      }, new Map<string, number>())
+    }
   }
 
   return (events as unknown as EventDbResult[]).map((e) => ({
@@ -85,7 +104,7 @@ export async function getEvents() {
     local: e.location,
     capacidade: e.capacity,
     status: e.status,
-    inscritos: e.event_participants?.[0]?.count || 0,
+    inscritos: participantCountByEvent.get(e.id) || 0,
     produto: e.products?.name || 'Geral',
     organizer_name: e.organizer_name,
     organizer_contact: e.organizer_contact,

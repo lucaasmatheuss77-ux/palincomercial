@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { createLead, updateLeadStage } from '@/app/actions/pipeline'
 import { recordCommercialActivity } from '@/app/actions/commercial-activities'
+import { ClientSearchField, type ClienteOption } from '@/components/client-search-field'
 import { triggerSaleConfetti } from '@/lib/effects'
 
 // ── Fundo estrelado ───────────────────────────────────────────────────────────
@@ -132,7 +133,7 @@ type Lead = {
   name: string
   stage?: string | null
   whatsapp?: string | null
-  estimated_value?: number | string | null
+  expected_value?: number | string | null
   ai_score?: number | null
   cnpj?: string | null
   segmento_especifico?: string | null
@@ -147,6 +148,7 @@ interface MobileHubProps {
     avatar_skin?: number | null
   } | null
   leads: Lead[]
+  clientes: ClienteOption[]
   agenda: { id: string; title?: string | null; scheduled_for?: string | null; client_name?: string | null }[]
   stats: {
     closedLeads: number
@@ -185,7 +187,6 @@ function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => 
       {open && (
         <div
           onClick={() => setOpen(false)}
-          onTouchStart={(e) => { e.preventDefault(); setOpen(false); }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', zIndex: 9990 }}
         />
       )}
@@ -337,6 +338,7 @@ function LeadRow({ lead, onTap }: { lead: Lead; onTap: () => void }) {
       borderRadius: 14, cursor: 'pointer', textAlign: 'left',
       boxShadow: isUrgent ? '0 2px 12px rgba(239,68,68,0.3), inset 0 1px 0 rgba(239,68,68,0.1)' : '0 2px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03)',
       transition: 'border-color 0.2s, box-shadow 0.2s',
+      WebkitTapHighlightColor: 'transparent',
     }}>
       <div style={{
         width: 38, height: 38, borderRadius: 10, flexShrink: 0,
@@ -398,7 +400,7 @@ function LeadDetail({ lead, onClose, onUpdate }: { lead: Lead; onClose: () => vo
               </div>
             )}
           </div>
-          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(255,255,255,0.06)', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
+          <button onClick={onClose} style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.06)', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={20} /></button>
         </div>
 
         <div>
@@ -406,7 +408,7 @@ function LeadDetail({ lead, onClose, onUpdate }: { lead: Lead; onClose: () => vo
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {STAGES.map(s => (
               <button key={s} onClick={() => moveStage(s)} disabled={loading}
-                style={{ padding: '6px 12px', borderRadius: 8, background: stage === s ? `${STAGE_COLORS[s]}20` : 'rgba(255,255,255,0.03)', border: `1px solid ${stage === s ? STAGE_COLORS[s] : 'rgba(255,255,255,0.07)'}`, color: stage === s ? STAGE_COLORS[s] : '#64748b', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
+                style={{ padding: '10px 12px', minHeight: 44, borderRadius: 8, background: stage === s ? `${STAGE_COLORS[s]}20` : 'rgba(255,255,255,0.03)', border: `1px solid ${stage === s ? STAGE_COLORS[s] : 'rgba(255,255,255,0.07)'}`, color: stage === s ? STAGE_COLORS[s] : '#64748b', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
                 {s}
               </button>
             ))}
@@ -723,7 +725,7 @@ function RadarView({ leads }: { leads: Lead[] }) {
 }
 
 // ── Ações View ────────────────────────────────────────────────────────────────
-function NewLeadInline({ onDone }: { onDone: (lead: Lead) => void }) {
+function NewLeadInline({ clientes, onDone }: { clientes: ClienteOption[]; onDone: (lead: Lead) => void }) {
   const [nome, setNome]    = useState('')
   const [whats, setWhats]  = useState('')
   const [valor, setValor]  = useState('')
@@ -736,14 +738,14 @@ function NewLeadInline({ onDone }: { onDone: (lead: Lead) => void }) {
       const r = await createLead({
         name: nome.trim(), company: nome.trim(),
         product_id: '', consultant_id: '',
-        estimated_value: Number(valor.replace(/\D/g,'')) || 0,
+        expected_value: Number(valor.replace(/\D/g,'')) || 0,
         stage: 'Contato Inicial',
         whatsapp: whats.trim() || undefined,
         segmento_especifico: cidade.trim() || undefined,
       })
       if (r.success && r.lead) {
         toast.success('Lead criado!', { description: `${nome}${cidade ? ` — ${cidade}` : ''}` })
-        onDone({ id: r.lead.id, name: nome, stage: 'Contato Inicial', whatsapp: whats||null, estimated_value: valor||null, ai_score: null, segmento_especifico: cidade||null })
+        onDone({ id: r.lead.id, name: nome, stage: 'Contato Inicial', whatsapp: whats||null, expected_value: valor||null, ai_score: null, segmento_especifico: cidade||null })
         setNome(''); setWhats(''); setValor(''); setCidade('')
       } else toast.error(r.error || 'Erro ao criar lead')
     })
@@ -752,6 +754,13 @@ function NewLeadInline({ onDone }: { onDone: (lead: Lead) => void }) {
   return (
     <div style={{ background: 'rgba(22,27,34,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 14, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
       <p style={{ fontSize: '0.6rem', fontWeight: 900, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Novo Lead</p>
+      <ClientSearchField
+        clientes={clientes}
+        selected={null}
+        onSelect={(cliente) => { setNome(cliente.nome); setWhats(cliente.phone || '') }}
+        onClear={() => {}}
+        placeholder="Ja e cliente? Buscar cadastro"
+      />
       <input value={nome} onChange={e => setNome(e.target.value)} placeholder="Nome do cliente *" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
       <input value={whats} onChange={e => setWhats(e.target.value)} placeholder="WhatsApp" type="tel" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
       <div style={{ display: 'flex', gap: 8 }}>
@@ -1047,7 +1056,7 @@ function AgendaView({ agenda }: { agenda: MobileHubProps['agenda'] }) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-export default function MobileHubClient({ user, leads: initialLeads, stats, agenda }: MobileHubProps) {
+export default function MobileHubClient({ user, leads: initialLeads, clientes, stats, agenda }: MobileHubProps) {
   const [activeTab, setActiveTab] = useState<TabId>('pipeline')
   const [greeting, setGreeting]   = useState('Olá')
   const [leads, setLeads]         = useState<Lead[]>(initialLeads)
@@ -1172,7 +1181,7 @@ export default function MobileHubClient({ user, leads: initialLeads, stats, agen
           {activeTab === 'agenda'   && <AgendaView agenda={agenda} />}
           {activeTab === 'radar'    && <RadarView leads={leads} />}
           {activeTab === 'voz'      && <VozView leads={leads} />}
-          {activeTab === 'lead'     && <NewLeadInline onDone={l => { setLeads([l,...leads]); setActiveTab('pipeline') }} />}
+          {activeTab === 'lead'     && <NewLeadInline clientes={clientes} onDone={l => { setLeads([l,...leads]); setActiveTab('pipeline') }} />}
           {activeTab === 'call'     && <LogCallInline leads={leads} />}
           {activeTab === 'contract' && <ContractInline leads={leads} onDone={() => setActiveTab('pipeline')} />}
         </div>
@@ -1194,4 +1203,6 @@ export default function MobileHubClient({ user, leads: initialLeads, stats, agen
     </>
   )
 }
+
+// SEO Helper: og: name="description" <title>
 

@@ -32,8 +32,8 @@ export type ClientRecord = {
   phone?: string | null
   whatsapp?: string | null
   status_cliente?: string | null
-  consultor_responsavel_id?: string | null
-  produto_foco_id?: string | null
+  consultant_id?: string | null
+  product_id?: string | null
   active_contract_id?: string | null
   created_at?: string
   updated_at?: string
@@ -54,8 +54,8 @@ export type ContractRecord = {
   value?: number | string | null
   signed_at?: string | null
   notes?: string | null
-  start_at?: string | null
-  end_at?: string | null
+  start_date?: string | null
+  end_date?: string | null
   pdf_bucket?: string | null
   pdf_path?: string | null
   pdf_file_name?: string | null
@@ -111,8 +111,8 @@ type ContractInput = {
   value?: number | string | null
   signed_at?: string | null
   notes?: string | null
-  start_at?: string | null
-  end_at?: string | null
+  start_date?: string | null
+  end_date?: string | null
   pdf_bucket?: string | null
   pdf_path?: string | null
   pdf_file_name?: string | null
@@ -123,8 +123,8 @@ type ContractInput = {
 }
 
 type ContractNotesMetadata = {
-  start_at?: string | null
-  end_at?: string | null
+  start_date?: string | null
+  end_date?: string | null
   pdf_path?: string | null
   pdf_file_name?: string | null
 }
@@ -153,6 +153,34 @@ function textOrNull(value?: string | null) {
 function normalizeDocument(value?: string | null) {
   const digits = value?.replace(/\D/g, '') || ''
   return digits || null
+}
+
+async function insertLeadWithSchemaFallback(
+  supabase: SupabaseServerClient,
+  payload: Record<string, unknown>
+) {
+  const currentPayload = { ...payload }
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const result = await supabase
+      .from('leads')
+      .insert(currentPayload)
+      .select('*')
+      .maybeSingle()
+
+    if (!result.error) return result
+
+    const missingColumn = result.error.message.match(/'([^']+)' column/)?.[1]
+    if (!missingColumn || !(missingColumn in currentPayload)) return result
+
+    delete currentPayload[missingColumn]
+  }
+
+  return supabase
+    .from('leads')
+    .insert(currentPayload)
+    .select('*')
+    .maybeSingle()
 }
 
 function sanitizeFileName(fileName?: string | null) {
@@ -221,8 +249,8 @@ function buildClientPayload(lead: LeadSnapshot, currentClient?: Partial<ClientRe
     phone: textOrNull(lead.phone) ?? currentClient?.phone ?? null,
     whatsapp: textOrNull(lead.whatsapp) ?? currentClient?.whatsapp ?? null,
     status_cliente: pickClientStatus(currentClient?.status_cliente, desiredStatus || (lead.stage === 'Fechado' ? 'aguardando_contrato' : 'lead')),
-    consultor_responsavel_id: lead.consultant_id ?? currentClient?.consultor_responsavel_id ?? null,
-    produto_foco_id: lead.product_id ?? currentClient?.produto_foco_id ?? null,
+    consultant_id: lead.consultant_id ?? currentClient?.consultant_id ?? null,
+    product_id: lead.product_id ?? currentClient?.product_id ?? null,
   }
 }
 
@@ -243,8 +271,8 @@ function buildContractNotes(notes?: string | null, metadata?: ContractNotesMetad
 
   if (!metadata) return nextNotes || null
 
-  nextNotes = replaceNoteTag(nextNotes, 'CONTRACT_START', metadata.start_at)
-  nextNotes = replaceNoteTag(nextNotes, 'VALID_UNTIL', metadata.end_at)
+  nextNotes = replaceNoteTag(nextNotes, 'CONTRACT_START', metadata.start_date)
+  nextNotes = replaceNoteTag(nextNotes, 'VALID_UNTIL', metadata.end_date)
   nextNotes = replaceNoteTag(nextNotes, 'PDF_PATH', metadata.pdf_path)
   nextNotes = replaceNoteTag(nextNotes, 'PDF_NAME', metadata.pdf_file_name)
 
@@ -262,8 +290,8 @@ function buildLegacyContractPayload(contract: ContractInput & { status: string }
     value: Number(contract.value || 0),
     signed_at: contract.signed_at ?? null,
     notes: buildContractNotes(contract.notes, {
-      start_at: contract.start_at,
-      end_at: contract.end_at,
+      start_date: contract.start_date,
+      end_date: contract.end_date,
       pdf_path: contract.pdf_path,
       pdf_file_name: contract.pdf_file_name,
     }),
@@ -431,8 +459,8 @@ async function saveContractRecord(
     value: Number(payload.value || 0),
     signed_at: payload.signed_at ?? null,
     notes: payload.notes ?? null,
-    start_at: payload.start_at ?? null,
-    end_at: payload.end_at ?? null,
+    start_date: payload.start_date ?? null,
+    end_date: payload.end_date ?? null,
     pdf_bucket: payload.pdf_bucket ?? null,
     pdf_path: payload.pdf_path ?? null,
     pdf_file_name: payload.pdf_file_name ?? null,
@@ -586,6 +614,7 @@ export async function createClientRecord(
   const email = textOrNull(data.email)
 
   let existingClient: ClientRecord | null = null
+  let clientsTableAvailable = true
   if (document) {
     const { data: byDocument, error: documentError } = await supabase
       .from('clientes')
@@ -594,14 +623,18 @@ export async function createClientRecord(
       .limit(1)
       .maybeSingle()
 
-    if (documentError && !isMissingSchemaError(documentError)) {
-      return { success: false, error: documentError.message }
+    if (documentError) {
+      if (isMissingSchemaError(documentError)) {
+        clientsTableAvailable = false
+      } else {
+        return { success: false, error: documentError.message }
+      }
     }
 
     existingClient = (byDocument as ClientRecord | null) || null
   }
 
-  if (!existingClient && email) {
+  if (clientsTableAvailable && !existingClient && email) {
     const { data: byEmail, error: emailError } = await supabase
       .from('clientes')
       .select('*')
@@ -609,8 +642,12 @@ export async function createClientRecord(
       .limit(1)
       .maybeSingle()
 
-    if (emailError && !isMissingSchemaError(emailError)) {
-      return { success: false, error: emailError.message }
+    if (emailError) {
+      if (isMissingSchemaError(emailError)) {
+        clientsTableAvailable = false
+      } else {
+        return { success: false, error: emailError.message }
+      }
     }
 
     existingClient = (byEmail as ClientRecord | null) || null
@@ -624,104 +661,120 @@ export async function createClientRecord(
       phone: textOrNull(data.phone),
       whatsapp: textOrNull(data.whatsapp),
       status_cliente: pickClientStatus(existingClient?.status_cliente, initialStatus),
-      consultor_responsavel_id: data.consultor_responsavel_id ?? null,
-      produto_foco_id: data.produto_foco_id ?? null,
+      consultant_id: data.consultor_responsavel_id ?? null,
+      product_id: data.produto_foco_id ?? null,
     }
 
-  const clientWrite = existingClient?.id
-    ? supabase
-      .from('clientes')
-      .update(clientPayload)
-      .eq('id', existingClient.id)
-    : supabase
-      .from('clientes')
-      .insert(clientPayload)
+  let client: ClientRecord | null = existingClient
 
-  const { data: createdClient, error: clientError } = await clientWrite
-    .select('*')
-    .maybeSingle()
+  if (clientsTableAvailable) {
+    const clientWrite = existingClient?.id
+      ? supabase
+        .from('clientes')
+        .update(clientPayload)
+        .eq('id', existingClient.id)
+      : supabase
+        .from('clientes')
+        .insert(clientPayload)
 
-  if (clientError) {
-    if (isMissingSchemaError(clientError)) {
-      return { success: false, error: 'Tabela de clientes indisponivel.' }
+    const { data: createdClient, error: clientError } = await clientWrite
+      .select('*')
+      .maybeSingle()
+
+    if (clientError) {
+      if (isMissingSchemaError(clientError)) {
+        clientsTableAvailable = false
+      } else {
+        return { success: false, error: clientError.message }
+      }
     }
 
-    return { success: false, error: clientError.message }
-  }
-
-  const client = (createdClient as ClientRecord | null) || existingClient || null
-  if (!client?.id) {
-    return { success: false, error: 'Nao foi possivel criar o cliente.' }
+    client = (createdClient as ClientRecord | null) || existingClient || null
   }
 
   let leadId: string | null = null
 
-  // Sempre cria lead vinculado ao cliente
-  const { data: createdLead, error: leadError } = await supabase
-    .from('leads')
-    .insert({
-      name,
-      company: textOrNull(data.company_name),
-      stage: crmStage,
-      estimated_value: 0,
-      product_id: data.produto_foco_id ?? null,
-      consultant_id: data.consultor_responsavel_id ?? null,
-      phone: textOrNull(data.phone),
-      whatsapp: textOrNull(data.whatsapp),
-      email: textOrNull(data.email),
-      client_id: client.id,
-      created_at: nowIso(),
-    })
-    .select('*')
-    .maybeSingle()
+  const leadPayload = {
+    name,
+    company_name: textOrNull(data.company_name),
+    stage: crmStage,
+    expected_value: 0,
+    product_id: data.produto_foco_id ?? null,
+    consultant_id: data.consultor_responsavel_id ?? null,
+    phone: textOrNull(data.phone),
+    whatsapp: textOrNull(data.whatsapp),
+    email,
+    created_at: nowIso(),
+  }
+
+  // Sempre cria lead no CRM. Se a tabela clientes existir, vincula tambem.
+  let leadResult = await insertLeadWithSchemaFallback(supabase, leadPayload)
+
+  if (leadResult.error && isMissingSchemaError(leadResult.error) && 'client_id' in leadPayload) {
+    const leadPayloadWithoutClient = { ...leadPayload }
+    delete (leadPayloadWithoutClient as { client_id?: string }).client_id
+    leadResult = await insertLeadWithSchemaFallback(supabase, leadPayloadWithoutClient)
+  }
+
+  const { data: createdLead, error: leadError } = leadResult
 
   if (leadError) {
-    console.warn('Criacao do lead no CRM indisponivel:', leadError.message)
+    return { success: false, error: leadError.message }
   } else if (createdLead?.id) {
     const newLeadId = createdLead.id
     leadId = newLeadId
-    await supabase
-      .from('clientes')
-      .update({
-        origin_lead_id: client.origin_lead_id ?? newLeadId,
-        status_cliente: pickClientStatus(client.status_cliente, crmStage === 'Fechado' ? 'aguardando_contrato' : 'lead'),
-        updated_at: nowIso(),
-      })
-      .eq('id', client.id)
 
-    await syncLeadClientLink(supabase, newLeadId, client.id)
+    if (clientsTableAvailable && client?.id) {
+      await supabase
+        .from('clientes')
+        .update({
+          origin_lead_id: client.origin_lead_id ?? newLeadId,
+          status_cliente: pickClientStatus(client.status_cliente, crmStage === 'Fechado' ? 'aguardando_contrato' : 'lead'),
+          updated_at: nowIso(),
+        })
+        .eq('id', client.id)
+
+      await syncLeadClientLink(supabase, newLeadId, client.id)
+    }
+
     await createLeadStageEvent(supabase, newLeadId, crmStage)
     await recordCommercialActivity({
       leadId: newLeadId,
-      clientId: client.id,
+      clientId: client?.id ?? null,
       activityType: 'client_created',
-      subject: `Cliente ${client.name} enviado ao CRM`,
-      summary: [`Etapa inicial: ${crmStage}`, client.company_name ? `Empresa: ${client.company_name}` : null].filter(Boolean).join(' | '),
+      subject: `Cliente ${name} enviado ao CRM`,
+      summary: [`Etapa inicial: ${crmStage}`, clientPayload.company_name ? `Empresa: ${clientPayload.company_name}` : null].filter(Boolean).join(' | '),
       nextStep: crmStage === 'Fechado' ? 'Gerar contrato e anexar documentos.' : 'Entrar em contato e agendar primeira reuniao.',
       status: 'registrada',
     })
   }
 
-  const { data: refreshedClient } = await supabase
-    .from('clientes')
-    .select('*')
-    .eq('id', client.id)
-    .maybeSingle()
+  let refreshedClient: ClientRecord | null = null
+  if (clientsTableAvailable && client?.id) {
+    const { data } = await supabase
+      .from('clientes')
+      .select('*')
+      .eq('id', client.id)
+      .maybeSingle()
+    refreshedClient = (data as ClientRecord | null) || null
+  }
 
   
   // Auto-create Insider Club member if product matches
-  try {
-    const { maybeCreateClubMemberFromClient } = await import('./clube')
-    await maybeCreateClubMemberFromClient(client.id, data.produto_foco_id)
-  } catch (clubErr) {
-    console.warn('Club auto-create skipped:', clubErr instanceof Error ? clubErr.message : clubErr)
+  if (client?.id) {
+    try {
+      const { maybeCreateClubMemberFromClient } = await import('./clube')
+      await maybeCreateClubMemberFromClient(client.id, data.produto_foco_id)
+    } catch (clubErr) {
+      console.warn('Club auto-create skipped:', clubErr instanceof Error ? clubErr.message : clubErr)
+    }
   }
   revalidatePath('/dashboard/clientes')
   revalidatePath('/dashboard/pipeline')
   revalidatePath('/dashboard/clube')
   revalidatePath('/dashboard')
 
-  return { success: true, data: (refreshedClient as ClientRecord | null) || client, leadId }
+  return { success: true, data: refreshedClient || client, leadId }
 }
 
 export async function upsertPendingContractFromDeal(
@@ -760,8 +813,8 @@ export async function upsertPendingContractFromDeal(
         contract_number: options?.contractFields?.contract_number ?? null,
         signed_at: options?.contractFields?.signed_at ?? null,
         notes: options?.contractFields?.notes ?? null,
-        start_at: options?.contractFields?.start_at ?? null,
-        end_at: options?.contractFields?.end_at ?? null,
+        start_date: options?.contractFields?.start_date ?? null,
+        end_date: options?.contractFields?.end_date ?? null,
         cancellation_reason: options?.contractFields?.cancellation_reason ?? null,
         signing_url: options?.contractFields?.signing_url ?? null,
       },
@@ -774,6 +827,41 @@ export async function upsertPendingContractFromDeal(
     console.warn('Contrato automatico indisponivel:', error instanceof Error ? error.message : error)
     return null
   }
+}
+
+export type ClienteOption = {
+  id: string
+  nome: string
+  company_name: string | null
+  documento: string | null
+  email: string | null
+  phone: string | null
+}
+
+export async function listClienteOptions(): Promise<ClienteOption[]> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('clientes')
+    .select('id, name, company_name, documento, email, phone, whatsapp')
+    .order('name', { ascending: true })
+    .limit(2000)
+
+  if (error) {
+    if (!isMissingSchemaError(error)) {
+      console.error('Erro ao listar clientes para busca:', error.message)
+    }
+    return []
+  }
+
+  return (data || []).map((client) => ({
+    id: client.id as string,
+    nome: (client.name as string) || 'Sem nome',
+    company_name: (client.company_name as string) || null,
+    documento: (client.documento as string) || null,
+    email: (client.email as string) || null,
+    phone: (client.phone as string) || (client.whatsapp as string) || null,
+  }))
 }
 
 export async function listClientes(limit = 200): Promise<{ success: boolean; data: ClientRecord[]; error?: string }> {
@@ -1004,13 +1092,13 @@ export async function updateClient(
     phone: data.phone === undefined ? (currentClient as ClientRecord).phone ?? null : textOrNull(data.phone),
     whatsapp: data.whatsapp === undefined ? (currentClient as ClientRecord).whatsapp ?? null : textOrNull(data.whatsapp),
     status_cliente: data.status_cliente === undefined ? (currentClient as ClientRecord).status_cliente ?? 'lead' : data.status_cliente,
-    consultor_responsavel_id:
+    consultant_id:
       data.consultor_responsavel_id === undefined
-        ? (currentClient as ClientRecord).consultor_responsavel_id ?? null
+        ? (currentClient as ClientRecord).consultant_id ?? null
         : data.consultor_responsavel_id,
-    produto_foco_id:
+    product_id:
       data.produto_foco_id === undefined
-        ? (currentClient as ClientRecord).produto_foco_id ?? null
+        ? (currentClient as ClientRecord).product_id ?? null
         : data.produto_foco_id,
   }
 
@@ -1162,8 +1250,8 @@ export async function uploadContractPdf(
       value: (contract as ContractRecord).value ?? 0,
       signed_at: (contract as ContractRecord).signed_at ?? null,
       notes: (contract as ContractRecord).notes ?? null,
-      start_at: (contract as ContractRecord).start_at ?? null,
-      end_at: (contract as ContractRecord).end_at ?? null,
+      start_date: (contract as ContractRecord).start_date ?? null,
+      end_date: (contract as ContractRecord).end_date ?? null,
       pdf_bucket: bucket,
       pdf_path: storedPath,
       pdf_file_name: fileName,
@@ -1247,8 +1335,8 @@ export async function uploadContractPdfFromForm(formData: FormData): Promise<{ s
 export async function activateContract(
   contractId: string,
   payload: {
-    start_at?: string | null
-    end_at?: string | null
+    start_date?: string | null
+    end_date?: string | null
     signed_at?: string | null
     notes?: string | null
   } = {}
@@ -1286,8 +1374,8 @@ export async function activateContract(
       value: (contract as ContractRecord).value ?? 0,
       signed_at: payload.signed_at ?? nowIso(),
       notes: payload.notes ?? (contract as ContractRecord).notes ?? null,
-      start_at: payload.start_at ?? (contract as ContractRecord).start_at ?? null,
-      end_at: payload.end_at ?? (contract as ContractRecord).end_at ?? null,
+      start_date: payload.start_date ?? (contract as ContractRecord).start_date ?? null,
+      end_date: payload.end_date ?? (contract as ContractRecord).end_date ?? null,
       pdf_bucket: (contract as ContractRecord).pdf_bucket ?? null,
       pdf_path: (contract as ContractRecord).pdf_path ?? null,
       pdf_file_name: (contract as ContractRecord).pdf_file_name ?? null,
@@ -1373,8 +1461,8 @@ export async function cancelContract(
       value: (contract as ContractRecord).value ?? 0,
       signed_at: (contract as ContractRecord).signed_at ?? null,
       notes: (contract as ContractRecord).notes ?? null,
-      start_at: (contract as ContractRecord).start_at ?? null,
-      end_at: (contract as ContractRecord).end_at ?? null,
+      start_date: (contract as ContractRecord).start_date ?? null,
+      end_date: (contract as ContractRecord).end_date ?? null,
       pdf_bucket: (contract as ContractRecord).pdf_bucket ?? null,
       pdf_path: (contract as ContractRecord).pdf_path ?? null,
       pdf_file_name: (contract as ContractRecord).pdf_file_name ?? null,
@@ -1416,8 +1504,8 @@ export async function renewContract(
   contractId: string,
   payload: {
     new_deal_id?: string | null
-    start_at?: string | null
-    end_at?: string | null
+    start_date?: string | null
+    end_date?: string | null
   } = {}
 ): Promise<{ success: boolean; error?: string; data?: ContractRecord | null }> {
   const supabase = await createClient()
@@ -1453,8 +1541,8 @@ export async function renewContract(
       value: (contract as ContractRecord).value ?? 0,
       signed_at: (contract as ContractRecord).signed_at ?? null,
       notes: (contract as ContractRecord).notes ?? null,
-      start_at: (contract as ContractRecord).start_at ?? null,
-      end_at: (contract as ContractRecord).end_at ?? null,
+      start_date: (contract as ContractRecord).start_date ?? null,
+      end_date: (contract as ContractRecord).end_date ?? null,
     },
     {
       contractId,
@@ -1501,8 +1589,8 @@ export async function renewContract(
       value: (contract as ContractRecord).value ?? 0,
       signed_at: null,
       notes: `Renovacao do contrato ${contractId}`,
-      start_at: payload.start_at ?? null,
-      end_at: payload.end_at ?? null,
+      start_date: payload.start_date ?? null,
+      end_date: payload.end_date ?? null,
     }
   )
 
