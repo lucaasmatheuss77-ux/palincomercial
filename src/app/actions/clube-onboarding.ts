@@ -5,6 +5,15 @@ import { createClient } from '@/lib/supabase/server'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
+export type StepAttachment = {
+  id: string
+  file_name: string
+  file_path: string
+  file_type: string | null
+  signed_url: string | null
+  uploaded_at: string
+}
+
 export type OnboardingStep = {
   id: string
   label: string
@@ -13,6 +22,7 @@ export type OnboardingStep = {
   done: boolean
   done_at: string | null
   notes: string | null
+  attachments: StepAttachment[]
 }
 
 export type OnboardingSession = {
@@ -50,7 +60,7 @@ type OnboardingData = {
   completed_at: string | null
 }
 
-const DEFAULT_STEPS: Omit<OnboardingStep, 'done' | 'done_at' | 'notes'>[] = [
+const DEFAULT_STEPS: Omit<OnboardingStep, 'done' | 'done_at' | 'notes' | 'attachments'>[] = [
   { id: 'boas_vindas',   label: 'Boas-vindas',          description: 'Reunião de apresentação, regras do clube e expectativas alinhadas.',       icon: '👋' },
   { id: 'diagnostico',   label: 'Diagnóstico inicial',  description: 'Levantamento da situação atual: negócio, desafios e pontos de melhoria.',   icon: '🔍' },
   { id: 'plano_acao',    label: 'Plano de ação',        description: 'Definição das metas, estratégias e cronograma da mentoria.',                icon: '📋' },
@@ -70,13 +80,14 @@ function parseOnboardingData(raw: string | null): OnboardingData {
   }
 }
 
-function buildOnboarding(memberId: string, raw: string | null): MemberOnboarding {
+function buildOnboarding(memberId: string, raw: string | null, attachmentsByStep: Record<string, StepAttachment[]> = {}): MemberOnboarding {
   const data = parseOnboardingData(raw)
   const steps: OnboardingStep[] = DEFAULT_STEPS.map(s => ({
     ...s,
     done: data.steps[s.id]?.done ?? false,
     done_at: data.steps[s.id]?.done_at ?? null,
     notes: data.steps[s.id]?.notes ?? null,
+    attachments: attachmentsByStep[s.id] ?? [],
   }))
   const donePct = Math.round((steps.filter(s => s.done).length / steps.length) * 100)
   return {
@@ -87,6 +98,41 @@ function buildOnboarding(memberId: string, raw: string | null): MemberOnboarding
     progress_pct: donePct,
     completed_at: data.completed_at,
   }
+}
+
+const CLUBE_JORNADA_BUCKET = 'clube-jornada'
+
+async function loadAttachmentsForMembers(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  memberIds: string[],
+): Promise<Record<string, Record<string, StepAttachment[]>>> {
+  if (!memberIds.length) return {}
+  const { data, error } = await supabase
+    .from('club_onboarding_attachments')
+    .select('id, member_id, step_id, file_name, file_path, file_type, uploaded_at')
+    .in('member_id', memberIds)
+    .order('uploaded_at', { ascending: false })
+
+  if (error || !data) return {}
+
+  const rows = data as { id: string; member_id: string; step_id: string; file_name: string; file_path: string; file_type: string | null; uploaded_at: string }[]
+
+  const withUrls = await Promise.all(
+    rows.map(async (row) => {
+      const { data: signed } = await supabase.storage.from(CLUBE_JORNADA_BUCKET).createSignedUrl(row.file_path, 60 * 60)
+      return { ...row, signed_url: signed?.signedUrl || null }
+    })
+  )
+
+  const result: Record<string, Record<string, StepAttachment[]>> = {}
+  for (const row of withUrls) {
+    result[row.member_id] ||= {}
+    result[row.member_id][row.step_id] ||= []
+    result[row.member_id][row.step_id].push({
+      id: row.id, file_name: row.file_name, file_path: row.file_path, file_type: row.file_type, signed_url: row.signed_url, uploaded_at: row.uploaded_at,
+    })
+  }
+  return result
 }
 
 // ─── Read ──────────────────────────────────────────────────────────────────────
@@ -103,7 +149,8 @@ export async function getMemberOnboarding(memberId: string): Promise<{ success: 
   if (error) return { success: false, error: error.message }
   if (!member) return { success: false, error: 'Membro não encontrado.' }
 
-  return { success: true, data: buildOnboarding(memberId, (member as { id: string; onboarding_data: string | null }).onboarding_data) }
+  const attachments = await loadAttachmentsForMembers(supabase, [memberId])
+  return { success: true, data: buildOnboarding(memberId, (member as { id: string; onboarding_data: string | null }).onboarding_data, attachments[memberId] || {}) }
 }
 
 export async function getAllMembersOnboarding(memberIds: string[]): Promise<Record<string, MemberOnboarding>> {
@@ -117,9 +164,10 @@ export async function getAllMembersOnboarding(memberIds: string[]): Promise<Reco
 
   if (error || !data) return {}
 
+  const attachmentsByMember = await loadAttachmentsForMembers(supabase, memberIds)
   const result: Record<string, MemberOnboarding> = {}
   for (const row of data as { id: string; onboarding_data: string | null }[]) {
-    result[row.id] = buildOnboarding(row.id, row.onboarding_data)
+    result[row.id] = buildOnboarding(row.id, row.onboarding_data, attachmentsByMember[row.id] || {})
   }
   return result
 }
@@ -294,6 +342,71 @@ export async function deleteOnboardingGoal(
     .eq('id', memberId)
 
   if (updateErr) return { success: false, error: updateErr.message }
+
+  revalidatePath('/dashboard/clube')
+  return { success: true }
+}
+
+// ─── Step attachments (documento, audio ou video por etapa) ───────────────────
+
+export async function uploadStepAttachment(formData: FormData): Promise<{ success: boolean; error?: string }> {
+  const memberId = String(formData.get('member_id') || '').trim()
+  const stepId = String(formData.get('step_id') || '').trim()
+  const file = formData.get('file')
+
+  if (!memberId || !stepId) return { success: false, error: 'Membro ou etapa nao informados.' }
+  if (!(file instanceof File) || file.size <= 0) return { success: false, error: 'Selecione um arquivo valido.' }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nao autorizado.' }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const path = `${memberId}/${stepId}/${Date.now()}-${safeName}`
+
+  const { error: uploadError } = await supabase.storage.from(CLUBE_JORNADA_BUCKET).upload(path, file, {
+    contentType: file.type || 'application/octet-stream',
+    upsert: false,
+  })
+
+  if (uploadError) return { success: false, error: uploadError.message }
+
+  const { error } = await supabase.from('club_onboarding_attachments').insert({
+    member_id: memberId,
+    step_id: stepId,
+    file_name: file.name,
+    file_path: path,
+    file_type: file.type || null,
+    file_size: file.size,
+    uploaded_by: user.id,
+  })
+
+  if (error) {
+    await supabase.storage.from(CLUBE_JORNADA_BUCKET).remove([path]).catch(() => {})
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath('/dashboard/clube')
+  return { success: true }
+}
+
+export async function deleteStepAttachment(attachmentId: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nao autorizado.' }
+
+  const { data: attachment } = await supabase
+    .from('club_onboarding_attachments')
+    .select('file_path')
+    .eq('id', attachmentId)
+    .maybeSingle()
+
+  if (attachment?.file_path) {
+    await supabase.storage.from(CLUBE_JORNADA_BUCKET).remove([attachment.file_path]).catch(() => {})
+  }
+
+  const { error } = await supabase.from('club_onboarding_attachments').delete().eq('id', attachmentId)
+  if (error) return { success: false, error: error.message }
 
   revalidatePath('/dashboard/clube')
   return { success: true }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Check, ChevronDown, ChevronUp, Plus, Trash2, Target, BookOpen, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Loader2, Paperclip, Plus, Trash2, Target, BookOpen, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import ActionDialog from '@/components/action-dialog'
 import {
@@ -10,6 +10,8 @@ import {
   deleteOnboardingSession,
   upsertOnboardingGoal,
   deleteOnboardingGoal,
+  uploadStepAttachment,
+  deleteStepAttachment,
 } from '@/app/actions/clube-onboarding'
 import type { MemberOnboarding, OnboardingSession, OnboardingGoal } from '@/app/actions/clube-onboarding'
 import type { ClubMember } from '@/app/actions/clube'
@@ -52,6 +54,7 @@ function StepItem({
   const [isPending, startTransition] = useTransition()
   const [expanded, setExpanded] = useState(false)
   const [notes, setNotes] = useState(step.notes ?? '')
+  const [uploading, setUploading] = useState(false)
 
   function handleToggle() {
     startTransition(async () => {
@@ -63,6 +66,30 @@ function StepItem({
         toast.error(res.error ?? 'Erro ao atualizar etapa')
       }
     })
+  }
+
+  async function handleUploadFile(file: File) {
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('member_id', memberId)
+      formData.append('step_id', step.id)
+      formData.append('file', file)
+      const res = await uploadStepAttachment(formData)
+      if (!res.success) { toast.error(res.error ?? 'Erro ao enviar arquivo'); return }
+      toast.success('Arquivo anexado a esta etapa.')
+      onUpdate(memberId, {})
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleDeleteAttachment(attachmentId: string) {
+    if (!confirm('Excluir este anexo?')) return
+    const res = await deleteStepAttachment(attachmentId)
+    if (!res.success) { toast.error(res.error ?? 'Erro ao excluir anexo'); return }
+    toast.success('Anexo removido.')
+    onUpdate(memberId, {})
   }
 
   return (
@@ -119,6 +146,46 @@ function StepItem({
             className="input-field"
             style={{ fontSize: '0.78rem', resize: 'vertical' }}
           />
+
+          <div style={{ marginTop: '10px', display: 'grid', gap: '6px' }}>
+            {step.attachments.length > 0 && (
+              <div style={{ display: 'grid', gap: '6px' }}>
+                {step.attachments.map(att => (
+                  <div key={att.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '6px 10px' }}>
+                    <Paperclip size={12} color="#64748b" style={{ flexShrink: 0 }} />
+                    {att.signed_url ? (
+                      <a href={att.signed_url} target="_blank" rel="noreferrer" style={{ flex: 1, color: '#0ea5e9', fontSize: '0.74rem', fontWeight: 700, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {att.file_name}
+                      </a>
+                    ) : (
+                      <span style={{ flex: 1, color: '#94a3b8', fontSize: '0.74rem' }}>{att.file_name}</span>
+                    )}
+                    <button onClick={() => void handleDeleteAttachment(att.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', opacity: 0.6, flexShrink: 0 }}>
+                      <Trash2 size={12} color="#ef4444" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <label style={{
+              display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: uploading ? 'wait' : 'pointer',
+              color: '#94a3b8', fontSize: '0.74rem', fontWeight: 700, background: 'rgba(255,255,255,0.03)',
+              border: '1px dashed rgba(255,255,255,0.12)', borderRadius: '8px', padding: '8px 12px', width: 'fit-content',
+            }}>
+              {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+              Anexar documento, áudio ou vídeo desta etapa
+              <input
+                type="file"
+                style={{ display: 'none' }}
+                disabled={uploading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void handleUploadFile(file)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
         </div>
       )}
     </div>

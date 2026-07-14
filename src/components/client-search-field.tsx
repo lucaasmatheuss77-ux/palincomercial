@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Building2 } from 'lucide-react'
+import { formatCnpj } from '@/lib/formatters'
 
 export type ClienteOption = {
   id: string
@@ -101,7 +102,7 @@ export function ClientSearchField({
                 }}
               >
                 <strong>{cliente.nome}</strong>
-                <small>{[cliente.company_name, cliente.documento].filter(Boolean).join(' · ') || 'Sem dados adicionais'}</small>
+                <small>{[cliente.company_name, formatCnpj(cliente.documento)].filter(Boolean).join(' \u00b7 ') || 'Sem dados adicionais'}</small>
               </button>
             ))
           ) : (

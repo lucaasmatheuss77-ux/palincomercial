@@ -22,8 +22,10 @@ import {
 import {
   listClientServices, createClientService, updateClientService, deleteClientService, type ClientServiceRecord
 } from '@/app/actions/client-services'
+import { formatCnpj } from '@/lib/formatters'
 import type { ClientRow } from '../clientes/clientes-client'
 
+const MAIN_HONORARIO_SERVICE_NAME = 'Honorário do Contrato Principal'
 const STATUS_TONES: Record<string, { color: string; background: string; border: string }> = {
   'Cliente criado': { color: '#93c5fd', background: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.22)' },
   'Contrato pendente': { color: 'var(--brand-primary)', background: 'rgba(251,191,36,0.12)', border: 'rgba(251,191,36,0.22)' },
@@ -49,11 +51,25 @@ function formatAge(value: string | null) {
   return `${days} dias`
 }
 function getTone(status: string) { return STATUS_TONES[status] || STATUS_TONES['Cliente criado'] }
+function getHonorarioDisplay(selectedRow: ClientRow): { label: string; value: string } {
+  if (selectedRow.contractValue && selectedRow.contractValue > 0) {
+    return { label: 'Valor do contrato', value: formatCurrency(selectedRow.contractValue) }
+  }
+  const activeService = selectedRow.services?.find((service) => service.nome === MAIN_HONORARIO_SERVICE_NAME && service.status === 'ativo')
+    || selectedRow.services?.find((service) => service.status === 'ativo')
+    || selectedRow.services?.[0]
+  if (activeService?.tipo_honorario === 'fixo' && activeService.honorario_valor) {
+    return { label: 'Honorário fixo', value: formatCurrency(activeService.honorario_valor) }
+  }
+  if (activeService?.tipo_honorario === 'percentual' && activeService.honorario_percentual) {
+    return { label: 'Honorário variável', value: `${activeService.honorario_percentual}%` }
+  }
+  return { label: 'Honorário', value: 'A definir' }
+}
 
 export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: ClientRow; onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<'geral' | 'reunioes' | 'contratos' | 'filiais' | 'trabalhos'>('geral')
-  const [contractForm, setContractForm] = useState({ contractNumber: '', contractValue: '', startAt: '', signedAt: '', validUntil: '', notes: '', status: 'pendente_assinatura', signingUrl: '' })
-  const [clientForm, setClientForm] = useState({ name: '', company: '', email: '', phone: '', whatsapp: '', document: '' })
+  const [contractForm, setContractForm] = useState({ contractNumber: '', contractValue: '', contractPercentual: '', honorarioTipo: 'fixo' as 'fixo' | 'percentual', startAt: '', signedAt: '', validUntil: '', notes: '', status: 'pendente_assinatura', signingUrl: '' })
+  const [clientForm, setClientForm] = useState({ name: '', company: '', email: '', phone: '', whatsapp: '', document: '', segmento: '', cidade: '', estado: '', notas: '' })
   const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null)
   const [selectedPdfPreview, setSelectedPdfPreview] = useState('')
   const [isPending, startTransition] = useTransition()
@@ -88,15 +104,29 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
   const [serviceSaving, setServiceSaving] = useState(false)
 
   const selectedTone = selectedRow ? getTone(selectedRow.clientStatusLabel) : STATUS_TONES['Cliente criado']
+  const honorarioDisplay = getHonorarioDisplay(selectedRow)
+  const displayRazaoSocial = selectedRow.razaoSocial || selectedRow.company || selectedRow.name
+  const displayContactName = selectedRow.contactName || selectedRow.name
 
   useEffect(() => {
     if (!selectedRow) return
     setContractForm({
-      contractNumber: selectedRow.contractNumber || '', contractValue: selectedRow.contractValue ? String(selectedRow.contractValue) : '', startAt: selectedRow.contractStartAt ? selectedRow.contractStartAt.slice(0, 10) : '', signedAt: selectedRow.contractSignedAt ? selectedRow.contractSignedAt.slice(0, 10) : '', validUntil: selectedRow.contractValidUntil ? selectedRow.contractValidUntil.slice(0, 10) : '', notes: selectedRow.contractNotes || '',
+      contractNumber: selectedRow.contractNumber || '', contractValue: selectedRow.contractValue ? String(selectedRow.contractValue) : '', contractPercentual: '', honorarioTipo: selectedRow.contractValue && selectedRow.contractValue > 0 ? 'fixo' : 'fixo', startAt: selectedRow.contractStartAt ? selectedRow.contractStartAt.slice(0, 10) : '', signedAt: selectedRow.contractSignedAt ? selectedRow.contractSignedAt.slice(0, 10) : '', validUntil: selectedRow.contractValidUntil ? selectedRow.contractValidUntil.slice(0, 10) : '', notes: selectedRow.contractNotes || '',
       status: selectedRow.clientStatusLabel === 'Contrato ativo' || selectedRow.clientStatusLabel === 'A vencer' ? 'ativo' : selectedRow.clientStatusLabel === 'Contrato cancelado' ? 'cancelado' : selectedRow.clientStatusLabel === 'Vencido' ? 'vencido' : 'pendente_assinatura',
       signingUrl: selectedRow.signingUrl || '',
     })
-    setClientForm({ name: selectedRow.name || '', company: selectedRow.company || '', email: selectedRow.email || '', phone: selectedRow.phone || '', whatsapp: selectedRow.whatsapp || '', document: selectedRow.document || '' })
+    setClientForm({
+      name: selectedRow.contactName || '',
+      company: selectedRow.razaoSocial || selectedRow.company || '',
+      email: selectedRow.email || '',
+      phone: selectedRow.phone || '',
+      whatsapp: selectedRow.whatsapp || '',
+      document: formatCnpj(selectedRow.document),
+      segmento: selectedRow.segmento || '',
+      cidade: selectedRow.cidade || '',
+      estado: selectedRow.estado || '',
+      notas: selectedRow.notas || '',
+    })
     setSelectedPdfFile(null)
     setSelectedPdfPreview('')
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -141,7 +171,7 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
 
   function openEditFilial(filial: FilialRecord) {
     setEditingFilialId(filial.id)
-    setFilialForm({ nome: filial.nome, documento: filial.documento || '', cidade: filial.cidade || '', estado: filial.estado || '' })
+    setFilialForm({ nome: filial.nome, documento: formatCnpj(filial.documento), cidade: filial.cidade || '', estado: filial.estado || '' })
     setFilialFormOpen(true)
   }
 
@@ -153,7 +183,7 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
       const payload = {
         client_id: selectedRow.clientRecordId,
         nome: filialForm.nome.trim(),
-        documento: filialForm.documento.trim() || null,
+        documento: formatCnpj(filialForm.documento) || null,
         cidade: filialForm.cidade.trim() || null,
         estado: filialForm.estado.trim() || null,
       }
@@ -189,7 +219,13 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
     if (!selectedRow?.clientRecordId) { setServices([]); return }
     setServicesLoading(true)
     listClientServices(selectedRow.clientRecordId)
-      .then((result) => setServices(result))
+      .then((result) => {
+        setServices(result)
+        const mainHonorario = result.find((service) => service.nome === MAIN_HONORARIO_SERVICE_NAME)
+        if (mainHonorario?.tipo_honorario === 'percentual' && mainHonorario.honorario_percentual != null) {
+          setContractForm((current) => ({ ...current, honorarioTipo: 'percentual', contractPercentual: String(mainHonorario.honorario_percentual) }))
+        }
+      })
       .catch(() => setServices([]))
       .finally(() => setServicesLoading(false))
     setServiceFormOpen(false)
@@ -272,7 +308,7 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
   async function copyContact() {
     const contact = selectedRow.whatsapp || selectedRow.phone || selectedRow.email
     if (!contact) { toast.info('Nenhum contato cadastrado para copiar.'); return }
-    try { await navigator.clipboard.writeText(contact); toast.success('Contato copiado.') } catch { toast.error('Nao foi possivel copiar o contato.') }
+    try { await navigator.clipboard.writeText(contact); toast.success('Contato copiado.') } catch { toast.error('Não foi possível copiar o contato.') }
   }
 
   async function handleGeneratePauta() {
@@ -297,26 +333,28 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
     try {
       const formData = new FormData()
       formData.append('audio', file)
-      formData.append('clientId', selectedRow?.clientRecordId || '')
+      formData.append('client_id', selectedRow?.clientRecordId || '')
       const response = await fetch('/api/meetings/transcribe', { method: 'POST', body: formData })
-      const data = await response.json() as { transcript?: string; pauta?: string; summary?: string; recording_link?: string; error?: string }
+      const data = await response.json() as { transcription?: string; summary?: string; action_items?: string[]; error?: string }
       if (!response.ok || data.error) { toast.error(data.error || 'Erro ao transcrever áudio.'); return }
       setMeetingForm((current) => ({
-        ...current, pauta: data.pauta || data.transcript || current.pauta, notes: data.summary ? (current.notes ? current.notes + '\n\nResumo IA:\n' + data.summary : 'Resumo IA:\n' + data.summary) : current.notes, recording_link: data.recording_link || current.recording_link,
+        ...current,
+        pauta: data.transcription || current.pauta,
+        notes: data.summary ? (current.notes ? current.notes + '\n\nResumo IA:\n' + data.summary : 'Resumo IA:\n' + data.summary) : current.notes,
       }))
-      toast.success('Áudio transcrito com sucesso!')
+      toast.success('Áudio transcrito e resumido pela IA!')
     } catch { toast.error('Falha ao enviar áudio.') } finally { setAudioUploading(false) }
   }
 
   function handleSaveMeeting() {
     if (!selectedRow?.clientRecordId) return
-    if (!meetingForm.title.trim()) { toast.error('Informe o titulo da reuniao.'); return }
-    if (!meetingForm.meeting_date) { toast.error('Informe a data da reuniao.'); return }
+    if (!meetingForm.title.trim()) { toast.error('Informe o título da reunião.'); return }
+    if (!meetingForm.meeting_date) { toast.error('Informe a data da reunião.'); return }
     startTransition(async () => {
       const result = await createClientMeeting(selectedRow.clientRecordId, {
         meeting_date: meetingForm.meeting_date, title: meetingForm.title.trim(), recording_link: meetingForm.recording_link.trim() || null, pauta: meetingForm.pauta.trim() || null, notes: meetingForm.notes.trim() || null, participants: meetingForm.participants.trim() || null, duration_min: meetingForm.duration_min ? Number(meetingForm.duration_min) : null, ai_generated: meetingForm.pauta.length > 0 && pautaLoading === false,
       })
-      if (!result.success) { toast.error(result.error || 'Erro ao salvar reuniao.'); return }
+      if (!result.success) { toast.error(result.error || 'Erro ao salvar reunião.'); return }
       toast.success('Reuniao registrada.')
       setMeetingFormOpen(false)
       setMeetingForm({ meeting_date: new Date().toISOString().split('T')[0], title: '', recording_link: '', participants: '', duration_min: '', pauta: '', notes: '' })
@@ -326,10 +364,10 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
   }
 
   function handleDeleteMeeting(meetingId: string) {
-    if (!confirm('Tem certeza que deseja excluir esta reuniao?')) return
+    if (!confirm('Tem certeza que deseja excluir esta reunião?')) return
     startTransition(async () => {
       const result = await deleteClientMeeting(meetingId)
-      if (!result.success) { toast.error(result.error || 'Erro ao excluir reuniao.'); return }
+      if (!result.success) { toast.error(result.error || 'Erro ao excluir reunião.'); return }
       toast.success('Reuniao excluida.')
       if (selectedRow?.clientRecordId) {
         const updated = await listClientMeetings(selectedRow.clientRecordId)
@@ -354,12 +392,36 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
   }
 
   function handleSaveContract() {
-    if (!selectedRow?.dealId) { toast.error('Feche o lead no fluxo comercial para gerar um deal antes de salvar o contrato.'); return }
+    if (!selectedRow?.clientRecordId) return
     startTransition(async () => {
+      if (contractForm.honorarioTipo === 'percentual') {
+        const percentualValue = Number(contractForm.contractPercentual || 0)
+        if (!percentualValue) { toast.error('Informe o percentual do honorário.'); return }
+        const existing = services.find((service) => service.nome === MAIN_HONORARIO_SERVICE_NAME)
+        const payload = {
+          client_id: selectedRow.clientRecordId, nome: MAIN_HONORARIO_SERVICE_NAME, tipo_honorario: 'percentual' as const,
+          honorario_valor: null, honorario_percentual: percentualValue, base_calculo: null, status: 'ativo', data_inicio: null, data_fim: null, notas: null,
+        }
+        const serviceResult = existing ? await updateClientService(existing.id, payload) : await createClientService(payload)
+        if (!serviceResult.success) { toast.error(serviceResult.error || 'Não foi possível salvar o honorário.'); return }
+        setServices(await listClientServices(selectedRow.clientRecordId))
+      } else {
+        const existing = services.find((service) => service.nome === MAIN_HONORARIO_SERVICE_NAME)
+        if (existing) {
+          await deleteClientService(existing.id)
+          setServices(await listClientServices(selectedRow.clientRecordId))
+        }
+      }
+
+      if (!selectedRow.dealId) {
+        toast.success('Honorário atualizado. Feche o lead no fluxo comercial para também gerar número/datas do contrato.')
+        return
+      }
+
       const result = await saveClientContract({
-        deal_id: selectedRow.dealId, lead_id: selectedRow.leadId, client_id: selectedRow.clientRecordId, contract_number: contractForm.contractNumber || null, value: Number(contractForm.contractValue || 0), start_date: contractForm.startAt ? new Date(contractForm.startAt).toISOString() : null, signed_at: contractForm.signedAt ? new Date(contractForm.signedAt).toISOString() : null, end_date: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : null, notes: contractForm.notes || null, status: contractForm.status, signing_url: contractForm.signingUrl.trim() || null,
+        deal_id: selectedRow.dealId, lead_id: selectedRow.leadId, client_id: selectedRow.clientRecordId, contract_number: contractForm.contractNumber || null, value: contractForm.honorarioTipo === 'fixo' ? Number(contractForm.contractValue || 0) : 0, start_date: contractForm.startAt ? new Date(contractForm.startAt).toISOString() : null, signed_at: contractForm.signedAt ? new Date(contractForm.signedAt).toISOString() : null, end_date: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : null, notes: contractForm.notes || null, status: contractForm.status, signing_url: contractForm.signingUrl.trim() || null,
       })
-      if (!result.success) { toast.error(result.error || 'Nao foi possivel salvar o contrato.'); return }
+      if (!result.success) { toast.error(result.error || 'Não foi possível salvar o contrato.'); return }
       toast.success('Contrato atualizado. Reabra a tela para ver os dados consolidados.')
     })
   }
@@ -375,7 +437,7 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
       formData.append('bucket', selectedRow.pdfBucket || 'contract-pdfs')
       formData.append('file', selectedPdfFile)
       const result = await uploadContractPdfFromForm(formData)
-      if (!result.success) { toast.error(result.error || 'Nao foi possivel enviar o PDF.'); return }
+      if (!result.success) { toast.error(result.error || 'Não foi possível enviar o PDF.'); return }
       setSelectedPdfFile(null); setSelectedPdfPreview('')
       if (fileInputRef.current) fileInputRef.current.value = ''
       toast.success('PDF do contrato enviado com sucesso.')
@@ -385,8 +447,19 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
   function handleSaveClient() {
     if (!selectedRow?.clientRecordId) { toast.error('Cliente nao encontrado para atualizacao.'); return }
     startTransition(async () => {
-      const result = await updateClient(selectedRow.clientRecordId, { name: clientForm.name || undefined, company_name: clientForm.company || null, email: clientForm.email || null, phone: clientForm.phone || null, whatsapp: clientForm.whatsapp || null, documento: clientForm.document || null })
-      if (!result.success) { toast.error(result.error || 'Nao foi possivel salvar o cliente.'); return }
+      const result = await updateClient(selectedRow.clientRecordId, {
+        name: clientForm.name || undefined,
+        company_name: clientForm.company || null,
+        email: clientForm.email || null,
+        phone: clientForm.phone || null,
+        whatsapp: clientForm.whatsapp || null,
+        documento: formatCnpj(clientForm.document) || undefined,
+        segmento: clientForm.segmento || null,
+        cidade: clientForm.cidade || null,
+        estado: clientForm.estado || null,
+        notas: clientForm.notas || null,
+      })
+      if (!result.success) { toast.error(result.error || 'Não foi possível salvar o cliente.'); return }
       toast.success('Cadastro do cliente atualizado. Reabra a tela para ver os dados consolidados.')
     })
   }
@@ -396,7 +469,7 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
     if (!contractId) { toast.error('Salve o contrato primeiro para depois ativar.'); return }
     startTransition(async () => {
       const result = await activateContract(contractId, { signed_at: contractForm.signedAt ? new Date(contractForm.signedAt).toISOString() : undefined, end_date: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : undefined, notes: contractForm.notes || undefined })
-      if (!result.success) { toast.error(result.error || 'Nao foi possivel ativar o contrato.'); return }
+      if (!result.success) { toast.error(result.error || 'Não foi possível ativar o contrato.'); return }
       toast.success('Contrato ativado. Reabra a tela para ver o status atualizado.')
     })
   }
@@ -406,7 +479,7 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
     if (!contractId) { toast.error('Nao existe contrato para cancelar.'); return }
     startTransition(async () => {
       const result = await cancelContract(contractId, contractForm.notes || undefined)
-      if (!result.success) { toast.error(result.error || 'Nao foi possivel cancelar o contrato.'); return }
+      if (!result.success) { toast.error(result.error || 'Não foi possível cancelar o contrato.'); return }
       toast.success('Contrato cancelado. Reabra a tela para ver o status atualizado.')
     })
   }
@@ -416,7 +489,7 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
     if (!contractId) { toast.error('Nao existe contrato para renovar.'); return }
     startTransition(async () => {
       const result = await renewContract(contractId, { start_date: contractForm.startAt ? new Date(contractForm.startAt).toISOString() : null, end_date: contractForm.validUntil ? new Date(contractForm.validUntil).toISOString() : null })
-      if (!result.success) { toast.error(result.error || 'Nao foi possivel gerar a renovacao.'); return }
+      if (!result.success) { toast.error(result.error || 'Não foi possível gerar a renovação.'); return }
       toast.success('Renovacao criada. Reabra a tela para ver o novo ciclo contratual.')
     })
   }
@@ -424,484 +497,384 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, zIndex: 600, background: 'rgba(0, 0, 0, 0.65)', backdropFilter: 'blur(4px)',
+        position: 'fixed', inset: 0, zIndex: 600, background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(8px)',
         display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px'
       }}
-      onClick={onClose}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: '100%', maxWidth: '900px', maxHeight: '90vh',
-          background: '#0f172a',
-          border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+          width: '100%', maxWidth: '1200px', height: 'calc(100vh - 40px)', maxHeight: '95vh',
+          background: 'linear-gradient(to bottom, #0f172a, #020617)',
+          border: '1px solid rgba(255,255,255,0.08)', borderRadius: '24px', boxShadow: '0 30px 60px -12px rgba(0,0,0,0.8)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden'
         }}
       >
-        <div style={{ padding: '24px 24px 0 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'grid', gap: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start' }}>
-            <div style={{ display: 'grid', gap: '6px' }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontSize: '0.72rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                <BadgeCheck size={14} />
-                Cliente selecionado
-              </div>
-              <div style={{ color: '#f8fafc', fontSize: '1.15rem', fontWeight: 900, lineHeight: 1.25 }}>{selectedRow.name}</div>
-              <div style={{ color: '#94a3b8', fontSize: '0.84rem', lineHeight: 1.5 }}>
-                {selectedRow.company || 'Sem empresa'} · {selectedRow.product}
-              </div>
+        {/* HEADER */}
+        <div style={{ padding: '28px 36px', borderBottom: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', background: 'rgba(255,255,255,0.01)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div style={{ color: '#f8fafc', fontSize: '1.8rem', fontWeight: 900, letterSpacing: '-0.02em' }}>{displayRazaoSocial}</div>
+              <span style={{ padding: '6px 14px', borderRadius: '999px', color: selectedTone.color, background: selectedTone.background, border: `1px solid ${selectedTone.border}`, fontSize: '0.75rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                {selectedRow.clientStatusLabel}
+              </span>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '8px',
-                color: '#94a3b8', cursor: 'pointer', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease'
-              }}
-              onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)' }}
-              onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'; e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)' }}
-            >
-              <X size={18} />
-            </button>
+            <div style={{ color: '#94a3b8', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '20px', fontWeight: 500 }}>
+              {displayContactName && <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><PhoneCall size={15}/>Contato: {displayContactName}</span>}
+              {selectedRow.document && <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Building2 size={15}/>{formatCnpj(selectedRow.document)}</span>}
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><BadgeCheck size={15}/>{selectedRow.product}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#cbd5e1' }}>Consultor: <strong style={{ color: '#f8fafc' }}>{selectedRow.consultant}</strong></span>
+            </div>
           </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            <span style={{ display: 'inline-flex', padding: '6px 10px', borderRadius: '999px', color: selectedTone.color, background: selectedTone.background, border: `1px solid ${selectedTone.border}`, fontSize: '0.68rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              {selectedRow.clientStatusLabel}
-            </span>
-            <span className="chip">Consultor: {selectedRow.consultant}</span>
-            <span className="chip">Produto: {selectedRow.product}</span>
-          </div>
-          
-          <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
-            {(['geral', 'reunioes', 'contratos', 'filiais', 'trabalhos'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                style={{
-                  background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid #38bdf8' : '2px solid transparent',
-                  padding: '10px 16px', color: activeTab === tab ? '#38bdf8' : '#94a3b8', fontSize: '0.85rem', fontWeight: 800, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.05em', transition: 'all 0.2s'
-                }}
-              >
-                {tab === 'geral' ? 'Visão Geral' : tab === 'reunioes' ? 'Reuniões & Inteligência' : tab === 'contratos' ? 'Contratos' : tab === 'filiais' ? 'Filiais' : 'Trabalhos'}
-              </button>
-            ))}
-          </div>
+          <button type="button" onClick={onClose} style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', color: '#94a3b8', cursor: 'pointer', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }} onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; e.currentTarget.style.color = '#ef4444' }} onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'; e.currentTarget.style.color = '#94a3b8' }}>
+            <X size={20} />
+          </button>
         </div>
 
-        <div style={{ padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', background: 'rgba(255,255,255,0.01)' }}>
+        {/* BODY (2-COLUMN GRID) */}
+        <div style={{ padding: '32px 36px', overflowY: 'auto', display: 'grid', gridTemplateColumns: 'minmax(360px, 450px) minmax(0, 1fr)', gap: '32px', alignItems: 'start' }}>
           
-          {activeTab === 'geral' && (
-            <>
-              {/* Prioridades */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '10px', background: 'linear-gradient(135deg, rgba(34,197,94,0.05), rgba(15,23,42,0.96))', border: '1px solid rgba(34,197,94,0.2)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#22c55e', fontSize: '0.75rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  <Sparkles size={14} /> Ação Sugerida / Prioridades
-                </div>
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  {selectedRow.clientStatusLabel === 'A vencer' && (
-                    <>
-                      <div style={{ color: '#f8fafc', fontSize: '0.85rem', fontWeight: 700 }}>1. Entrar em contato para renovação imediata.</div>
-                      <div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>2. Agendar reunião de alinhamento de resultados.</div>
-                    </>
-                  )}
-                  {selectedRow.clientStatusLabel === 'Contrato pendente' && (
-                    <>
-                      <div style={{ color: '#f8fafc', fontSize: '0.85rem', fontWeight: 700 }}>1. Fazer follow-up para assinatura de contrato.</div>
-                      <div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>2. Oferecer suporte em dúvidas.</div>
-                    </>
-                  )}
-                  {selectedRow.clientStatusLabel === 'Vencido' && (
-                    <>
-                      <div style={{ color: '#f8fafc', fontSize: '0.85rem', fontWeight: 700 }}>1. Investigar motivo da não renovação.</div>
-                      <div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>2. Enviar proposta com novas condições.</div>
-                    </>
-                  )}
-                  {(selectedRow.clientStatusLabel === 'Contrato ativo' || selectedRow.clientStatusLabel === 'Cliente criado') && (
-                    <>
-                      <div style={{ color: '#f8fafc', fontSize: '0.85rem', fontWeight: 700 }}>1. Verificar satisfação e uso do serviço atual.</div>
-                      <div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>2. Identificar oportunidades de Cross-sell.</div>
-                    </>
-                  )}
-                </div>
-              </div>
+          {/* LEFT COLUMN: Client Data, Meetings, Filiais */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          
+          {/* QUICK ACTIONS */}
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            {selectedRow.whatsapp && (
+               <button type="button" onClick={() => window.open(`https://wa.me/55${selectedRow.whatsapp?.replace(/\D/g, '')}`, '_blank')} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', borderRadius: '12px', fontSize: '0.85rem', fontWeight: 800, background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff', border: '1px solid rgba(34,197,94,0.5)', cursor: 'pointer', boxShadow: '0 4px 12px rgba(34,197,94,0.2)' }}><MessageCircle size={16} /> Falar no WhatsApp</button>
+            )}
+            <button type="button" onClick={() => setCallModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', borderRadius: '12px', fontSize: '0.85rem', fontWeight: 800, background: 'rgba(255,255,255,0.08)', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}><Phone size={16} /> Registrar Ligação</button>
+            <button type="button" onClick={copyContact} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', borderRadius: '12px', fontSize: '0.85rem', fontWeight: 800, background: 'rgba(255,255,255,0.03)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer' }}><Copy size={16} /> Copiar Contatos</button>
+          </div>
 
-              {/* Contatos e Ações Rápidas */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '10px' }}>
-                <div style={{ color: '#94a3b8', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Contatos & Ações</div>
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}><span style={{ color: '#cbd5e1' }}>E-mail</span><span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.email || 'Nao cadastrado'}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}><span style={{ color: '#cbd5e1' }}>Telefone</span><span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.phone || 'Nao cadastrado'}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}><span style={{ color: '#cbd5e1' }}>WhatsApp</span><span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.whatsapp || 'Nao cadastrado'}</span></div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', paddingTop: '8px' }}>
-                    <button type="button" className="btn-primary" onClick={copyContact}><Copy size={16} /> Copiar</button>
-                    {(selectedRow.phone || selectedRow.whatsapp) && (
-                      <button type="button" onClick={() => { const num = (selectedRow.phone || selectedRow.whatsapp || '').replace(/\D/g, ''); if (num) window.open(`tel:${num}`); setCallModalOpen(true); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer' }}><PhoneCall size={13} /> Ligar</button>
-                    )}
-                    {selectedRow.whatsapp && (
-                      <button type="button" onClick={() => { const num = (selectedRow.whatsapp || '').replace(/\D/g, ''); if (num) window.open(`https://wa.me/55${num}`, '_blank'); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, background: 'rgba(37,211,102,0.15)', color: '#25d366', border: '1px solid rgba(37,211,102,0.3)', cursor: 'pointer' }}><MessageCircle size={13} /> WhatsApp</button>
-                    )}
-                    <button type="button" onClick={() => setCallModalOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}><Phone size={13} /> Registrar ligação</button>
-                    <Link href={`/dashboard/pipeline${selectedRow.leadId ? `?lead=${selectedRow.leadId}` : ''}`} className="btn-ghost" style={{ textDecoration: 'none' }}><ExternalLink size={16} /> CRM</Link>
-                  </div>
-                </div>
-              </div>
-
-              {/* Dados do Cliente */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '10px' }}>
-                <div style={{ color: '#94a3b8', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Dados do cliente</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
-                  <input className="input-field" value={clientForm.name} onChange={(e) => setClientField('name', e.target.value)} placeholder="Nome" />
-                  <input className="input-field" value={clientForm.company} onChange={(e) => setClientField('company', e.target.value)} placeholder="Empresa" />
-                  <input className="input-field" value={clientForm.email} onChange={(e) => setClientField('email', e.target.value)} placeholder="E-mail" />
-                  <input className="input-field" value={clientForm.document} onChange={(e) => setClientField('document', e.target.value)} placeholder="Documento" />
-                  <input className="input-field" value={clientForm.phone} onChange={(e) => setClientField('phone', e.target.value)} placeholder="Telefone" />
-                  <input className="input-field" value={clientForm.whatsapp} onChange={(e) => setClientField('whatsapp', e.target.value)} placeholder="WhatsApp" />
-                </div>
-                <button type="button" className="btn-primary" onClick={handleSaveClient} disabled={isPending} style={{ marginTop: '8px' }}><CheckCircle2 size={16} /> Salvar cliente</button>
-              </div>
-            </>
-          )}
-
-          {activeTab === 'reunioes' && (
-            <>
-              {/* REUNIÕES */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Video size={15} color="#e2e8f0" />
-                    <span style={{ color: '#e2e8f0', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Reunioes</span>
-                    {meetingsLoading ? <Loader2 size={13} color="#64748b" style={{ animation: 'spin 1s linear infinite' }} /> : <span style={{ color: '#64748b', fontSize: '0.72rem' }}>{meetings.length} registrada(s)</span>}
-                  </div>
-                  <button type="button" className="btn-ghost" style={{ padding: '5px 10px', fontSize: '0.76rem', gap: '5px' }} onClick={() => setMeetingFormOpen((o) => !o)}><Plus size={13} /> Nova reuniao</button>
-                </div>
-
-                {meetingFormOpen && (
-                  <div style={{ display: 'grid', gap: '10px', padding: '12px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px' }}>
-                      <input className="input-field" type="date" value={meetingForm.meeting_date} onChange={(e) => setMeetingForm((f) => ({ ...f, meeting_date: e.target.value }))} />
-                      <input className="input-field" placeholder="Titulo da reuniao" value={meetingForm.title} onChange={(e) => setMeetingForm((f) => ({ ...f, title: e.target.value }))} />
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'center' }}>
-                      <input className="input-field" placeholder="Link da gravacao" value={meetingForm.recording_link} onChange={(e) => setMeetingForm((f) => ({ ...f, recording_link: e.target.value }))} />
-                      <div style={{ position: 'relative' }}>
-                        <input type="file" accept="audio/*,video/*" onChange={handleUploadAudio} style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', cursor: 'pointer', zIndex: 10 }} disabled={audioUploading} />
-                        <button type="button" className="btn-ghost" style={{ padding: '0 12px', height: '36px', fontSize: '0.78rem', gap: '6px', whiteSpace: 'nowrap' }} disabled={audioUploading}>{audioUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}{audioUploading ? 'Transcrevendo...' : 'Upload Áudio'}</button>
-                      </div>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px' }}>
-                      <input className="input-field" placeholder="Participantes" value={meetingForm.participants} onChange={(e) => setMeetingForm((f) => ({ ...f, participants: e.target.value }))} />
-                      <input className="input-field" type="number" placeholder="Duracao (min)" value={meetingForm.duration_min} onChange={(e) => setMeetingForm((f) => ({ ...f, duration_min: e.target.value }))} />
-                    </div>
-                    <div style={{ display: 'grid', gap: '6px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: '#94a3b8', fontSize: '0.74rem', fontWeight: 700 }}>Pauta</span>
-                        <button type="button" className="btn-ghost" style={{ padding: '4px 10px', fontSize: '0.74rem', gap: '5px', color: '#e2e8f0' }} onClick={handleGeneratePauta} disabled={pautaLoading}>{pautaLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Gerar com IA</button>
-                      </div>
-                      <textarea className="input-field" placeholder="Pauta da reuniao" value={meetingForm.pauta} rows={5} onChange={(e) => setMeetingForm((f) => ({ ...f, pauta: e.target.value }))} />
-                    </div>
-                    <textarea className="input-field" placeholder="Notas adicionais" value={meetingForm.notes} rows={2} onChange={(e) => setMeetingForm((f) => ({ ...f, notes: e.target.value }))} />
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                      <button type="button" className="btn-ghost" onClick={() => setMeetingFormOpen(false)}>Cancelar</button>
-                      <button type="button" className="btn-primary" onClick={handleSaveMeeting} disabled={isPending}><CheckCircle2 size={14} /> Salvar reuniao</button>
-                    </div>
-                  </div>
-                )}
-                
-                {meetings.length === 0 && !meetingsLoading && !meetingFormOpen && <div style={{ padding: '12px', borderRadius: '12px', border: '1px dashed rgba(148,163,184,0.18)', color: '#94a3b8', fontSize: '0.78rem' }}>Nenhuma reuniao registrada.</div>}
-                
-                {meetings.map((meeting, index) => {
-                  const isExpanded = expandedMeetingId === meeting.id
-                  return (
-                    <div key={meeting.id} style={{ borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)', overflow: 'hidden' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', cursor: 'pointer' }} onClick={() => setExpandedMeetingId(isExpanded ? null : meeting.id)}>
-                        <div style={{ minWidth: '24px', height: '24px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#e2e8f0', fontWeight: 900, fontSize: '0.72rem' }}>{meetings.length - index}</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.84rem' }}>{meeting.title}</div>
-                          <div style={{ color: '#94a3b8', fontSize: '0.72rem', marginTop: '2px' }}>{formatDate(meeting.meeting_date)}{meeting.duration_min ? ` · ${meeting.duration_min} min` : ''}{meeting.ai_generated ? ' · IA' : ''}</div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {meeting.recording_link && <a href={meeting.recording_link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: '#e2e8f0' }}><ExternalLink size={14} /></a>}
-                          <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteMeeting(meeting.id) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><Trash2 size={13} /></button>
-                          {isExpanded ? <ChevronUp size={14} color="#64748b" /> : <ChevronDown size={14} color="#64748b" />}
-                        </div>
-                      </div>
-                      {isExpanded && (
-                        <div style={{ padding: '0 12px 12px', display: 'grid', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                          {meeting.participants && <div><span style={{ color: '#64748b', fontSize: '0.72rem', fontWeight: 700 }}>Participantes</span><div style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>{meeting.participants}</div></div>}
-                          {meeting.pauta && <div><span style={{ color: '#64748b', fontSize: '0.72rem', fontWeight: 700 }}>Pauta</span><div style={{ color: '#cbd5e1', fontSize: '0.78rem', whiteSpace: 'pre-wrap', padding: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>{meeting.pauta}</div></div>}
-                          {meeting.notes && <div><span style={{ color: '#64748b', fontSize: '0.72rem', fontWeight: 700 }}>Notas</span><div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>{meeting.notes}</div></div>}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Historico Comercial */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '12px' }}>
-                <div style={{ color: '#e2e8f0', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Historico comercial</div>
-                <div style={{ display: 'grid', gap: '10px' }}>
-                  {selectedRow.commercialHistory.length ? selectedRow.commercialHistory.map((entry, index) => (
-                    <div key={`${entry.title}-${index}`} style={{ padding: '12px', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}><div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.84rem' }}>{entry.title}</div><span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>{formatDate(entry.date)}</span></div>
-                      <div style={{ color: '#cbd5e1', fontSize: '0.78rem', marginTop: '4px' }}>{entry.detail}</div>
-                    </div>
-                  )) : <div style={{ padding: '12px', borderRadius: '14px', border: '1px dashed rgba(255,255,255,0.1)', color: '#94a3b8', fontSize: '0.78rem' }}>Sem historico comercial.</div>}
-                </div>
-              </div>
-            </>
-          )}
-
-          {activeTab === 'contratos' && (
-            <>
-              {/* Resumo Contrato */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '10px' }}>
-                <div style={{ color: '#94a3b8', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Resumo operacional</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
-                  <div className="kpi-card" style={{ padding: '12px' }}><div style={{ color: '#94a3b8', fontSize: '0.68rem', textTransform: 'uppercase' }}>Contrato</div><div style={{ marginTop: '6px', color: '#f8fafc', fontWeight: 900 }}>{selectedRow.contractNumber || 'Nao gerado'}</div></div>
-                  <div className="kpi-card" style={{ padding: '12px' }}><div style={{ color: '#94a3b8', fontSize: '0.68rem', textTransform: 'uppercase' }}>Valor</div><div style={{ marginTop: '6px', color: '#86efac', fontWeight: 900 }}>{formatCurrency(selectedRow.contractValue)}</div></div>
-                </div>
-              </div>
-
-              {/* Formulario Contrato */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '12px' }}>
-                <div style={{ color: '#94a3b8', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Dados do contrato</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
-                  <input className="input-field" value={contractForm.contractNumber} onChange={(e) => setFormField('contractNumber', e.target.value)} placeholder="Numero" />
-                  <input className="input-field" type="number" value={contractForm.contractValue} onChange={(e) => setFormField('contractValue', e.target.value)} placeholder="Valor" />
-                  <input className="input-field" type="date" value={contractForm.startAt} onChange={(e) => setFormField('startAt', e.target.value)} />
-                  <input className="input-field" type="date" value={contractForm.signedAt} onChange={(e) => setFormField('signedAt', e.target.value)} />
-                  <input className="input-field" type="date" value={contractForm.validUntil} onChange={(e) => setFormField('validUntil', e.target.value)} style={{ gridColumn: 'span 2' }} />
-                </div>
-                <select className="input-field" value={contractForm.status} onChange={(e) => setFormField('status', e.target.value)} style={{ background: 'var(--brand-surface)' }}>
-                  <option value="pendente_assinatura">Contrato pendente</option><option value="ativo">Contrato ativo</option><option value="vencido">Vencido</option><option value="cancelado">Cancelado</option>
-                </select>
-                <textarea className="input-field" rows={3} value={contractForm.notes} onChange={(e) => setFormField('notes', e.target.value)} placeholder="Observacoes" />
-                <input className="input-field" placeholder="Link de assinatura (Clicksign, etc)" value={contractForm.signingUrl} onChange={(e) => setFormField('signingUrl', e.target.value)} />
-                
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
-                  <button type="button" className="btn-primary" onClick={handleSaveContract} disabled={isPending}><CheckCircle2 size={16} /> Salvar contrato</button>
-                  <button type="button" className="btn-ghost" onClick={handleActivateContract} disabled={isPending || !selectedRow.dealId}><ShieldCheck size={16} /> Ativar</button>
-                  <button type="button" className="btn-ghost" onClick={handleRenewContract} disabled={isPending || !selectedRow.contractId}><RefreshCcw size={16} /> Renovar</button>
-                  <button type="button" className="btn-ghost" onClick={handleCancelContract} disabled={isPending || !selectedRow.contractId}><AlertTriangle size={16} /> Cancelar</button>
-                </div>
-              </div>
-
-              {/* Upload PDF */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '10px' }}>
-                <div style={{ color: '#94a3b8', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Documento PDF</div>
-                <div style={{ borderRadius: '12px', border: '1px dashed rgba(255,255,255,0.1)', padding: '14px' }}>
-                  <input ref={fileInputRef} className="input-field" type="file" accept="application/pdf,.pdf" onChange={(e) => setSelectedPdfFile(e.target.files?.[0] || null)} />
-                  {selectedPdfFile && <button type="button" className="btn-primary" style={{ marginTop: '8px' }} onClick={handleUploadPdf} disabled={isPending}><Upload size={16} /> Enviar PDF</button>}
-                  {selectedRow.pdfUrl && !selectedPdfFile && <a href={selectedRow.pdfUrl} target="_blank" rel="noreferrer" className="btn-ghost" style={{ display: 'inline-flex', marginTop: '8px', textDecoration: 'none' }}><ExternalLink size={16} /> Abrir PDF Atual</a>}
-                </div>
-              </div>
-
-              {/* Historico do Contrato */}
-              <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '12px' }}>
-                <div style={{ color: '#e2e8f0', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Historico do contrato</div>
-                <div style={{ display: 'grid', gap: '10px' }}>
-                  {selectedRow.contractHistory.length ? selectedRow.contractHistory.map((entry, index) => (
-                    <div key={`${entry.title}-${index}`} style={{ padding: '12px', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}><div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.84rem' }}>{entry.title}</div><span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>{formatDate(entry.date)}</span></div>
-                      <div style={{ color: '#cbd5e1', fontSize: '0.78rem', marginTop: '4px' }}>{entry.detail}</div>
-                    </div>
-                  )) : <div style={{ padding: '12px', borderRadius: '14px', border: '1px dashed rgba(255,255,255,0.1)', color: '#94a3b8', fontSize: '0.78rem' }}>Sem historico do contrato.</div>}
-                </div>
-              </div>
-            </>
-          )}
-
-          {activeTab === 'filiais' && (
-            <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Building2 size={15} color="#22c55e" />
-                  <span style={{ color: '#22c55e', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Filiais</span>
-                  {filiaisLoading ? <Loader2 size={13} color="#64748b" style={{ animation: 'spin 1s linear infinite' }} /> : <span style={{ color: '#64748b', fontSize: '0.72rem' }}>{filiais.length} cadastrada(s)</span>}
-                </div>
-                <button type="button" className="btn-ghost" style={{ padding: '5px 10px', fontSize: '0.76rem', gap: '5px' }} onClick={openNewFilial}><Plus size={13} /> Nova filial</button>
-              </div>
-
-              {filialFormOpen && (
-                <div style={{ display: 'grid', gap: '10px', padding: '12px', borderRadius: '12px', background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.15)' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px' }}>
-                    <input className="input-field" placeholder="Nome da filial" value={filialForm.nome} onChange={(e) => setFilialForm((f) => ({ ...f, nome: e.target.value }))} />
-                    <input className="input-field" placeholder="Documento (CNPJ/CPF)" value={filialForm.documento} onChange={(e) => setFilialForm((f) => ({ ...f, documento: e.target.value }))} />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px' }}>
-                    <input className="input-field" placeholder="Cidade" value={filialForm.cidade} onChange={(e) => setFilialForm((f) => ({ ...f, cidade: e.target.value }))} />
-                    <input className="input-field" placeholder="Estado" value={filialForm.estado} onChange={(e) => setFilialForm((f) => ({ ...f, estado: e.target.value }))} />
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn-ghost" onClick={() => { setFilialFormOpen(false); setEditingFilialId(null) }}>Cancelar</button>
-                    <button type="button" className="btn-primary" onClick={handleSaveFilial} disabled={filialSaving}><CheckCircle2 size={14} /> {filialSaving ? 'Salvando...' : editingFilialId ? 'Salvar alteracoes' : 'Salvar filial'}</button>
-                  </div>
-                </div>
-              )}
-
-              {filiais.length === 0 && !filiaisLoading && !filialFormOpen && (
-                <div style={{ padding: '12px', borderRadius: '12px', border: '1px dashed rgba(148,163,184,0.18)', color: '#94a3b8', fontSize: '0.78rem' }}>Nenhuma filial cadastrada para este cliente ainda.</div>
-              )}
-
-              {filiais.map((filial) => (
-                <div key={filial.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', borderRadius: '12px', border: '1px solid rgba(34,197,94,0.15)', background: 'rgba(34,197,94,0.04)' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.84rem' }}>{filial.nome}</div>
-                    <div style={{ color: '#94a3b8', fontSize: '0.72rem', marginTop: '2px' }}>
-                      {[filial.documento, filial.cidade, filial.estado].filter(Boolean).join(' · ') || 'Sem dados adicionais'}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <button type="button" className="btn-ghost" style={{ padding: '4px 8px' }} aria-label={`Editar filial ${filial.nome}`} onClick={() => openEditFilial(filial)}><Edit3 size={13} /></button>
-                    <button type="button" className="btn-ghost" style={{ padding: '4px 8px', color: '#f87171' }} aria-label={`Excluir filial ${filial.nome}`} onClick={() => handleDeleteFilial(filial.id)}><Trash2 size={13} /></button>
-                  </div>
-                </div>
-              ))}
+          {/* RESUMO RAPIDO */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '14px', padding: '14px 16px' }}>
+              <div style={{ color: '#64748b', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Origem</div>
+              <div style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 700 }}>{selectedRow.sourceLabel || 'Nao informada'}</div>
             </div>
-          )}
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '14px', padding: '14px 16px' }}>
+              <div style={{ color: '#64748b', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Cliente desde</div>
+              <div style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 700 }}>{formatDate(selectedRow.createdAt)}</div>
+            </div>
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '14px', padding: '14px 16px' }}>
+              <div style={{ color: '#64748b', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Status do contrato</div>
+              <div style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 700 }}>{selectedRow.contractStatusLabel || 'Sem contrato'}</div>
+            </div>
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '14px', padding: '14px 16px' }}>
+              <div style={{ color: '#64748b', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Vencimento</div>
+              <div style={{ color: selectedRow.daysToExpire !== null && selectedRow.daysToExpire <= 90 ? '#facc15' : '#e2e8f0', fontSize: '0.85rem', fontWeight: 700 }}>
+                {selectedRow.contractValidUntil ? formatDate(selectedRow.contractValidUntil) : 'Nao definido'}
+              </div>
+            </div>
+          </div>
 
-          {activeTab === 'trabalhos' && (
-            <div className="glass-card" style={{ padding: '16px', display: 'grid', gap: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <BadgeCheck size={15} color="#c084fc" />
-                  <span style={{ color: '#c084fc', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Trabalhos / Servicos</span>
-                  {servicesLoading ? <Loader2 size={13} color="#64748b" style={{ animation: 'spin 1s linear infinite' }} /> : <span style={{ color: '#64748b', fontSize: '0.72rem' }}>{services.length} cadastrado(s)</span>}
+          {/* DADOS CADASTRAIS (RECEITA E OUTROS) */}
+          <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '20px', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ color: '#f8fafc', fontSize: '1.05rem', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Building2 size={18} color="#94a3b8" /> Dados Cadastrais & Empresa
+              </div>
+              <button type="button" onClick={handleSaveClient} style={{ background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 12px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}><Edit3 size={14} /> Salvar Alterações</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>Contato principal</label>
+                <input className="input-field" value={clientForm.name} onChange={e => setClientField('name', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>CNPJ / CPF</label>
+                <input className="input-field" value={clientForm.document} onChange={e => setClientField('document', formatCnpj(e.target.value))} placeholder="00.000.000/0001-00" inputMode="numeric" style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>Razão Social</label>
+                <input className="input-field" value={clientForm.company} onChange={e => setClientField('company', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>E-mail</label>
+                <input className="input-field" value={clientForm.email} onChange={e => setClientField('email', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>Telefone</label>
+                <input className="input-field" value={clientForm.phone} onChange={e => setClientField('phone', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>WhatsApp</label>
+                <input className="input-field" value={clientForm.whatsapp} onChange={e => setClientField('whatsapp', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>Segmento</label>
+                <input className="input-field" value={clientForm.segmento} onChange={e => setClientField('segmento', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>Cidade</label>
+                <input className="input-field" value={clientForm.cidade} onChange={e => setClientField('cidade', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>Estado</label>
+                <input className="input-field" value={clientForm.estado} maxLength={2} onChange={e => setClientField('estado', e.target.value.toUpperCase())} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginBottom: '6px' }}>Observações cadastrais</label>
+                <textarea className="input-field" rows={3} value={clientForm.notas} onChange={e => setClientField('notas', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              </div>
+            </div>
+          </div>
+
+
+            
+            {/* COLUMN: MEETINGS */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc', fontSize: '1.1rem', fontWeight: 900 }}>
+                  <Video size={20} color="#38bdf8" /> Reuniões Agendadas
                 </div>
-                <button type="button" className="btn-ghost" style={{ padding: '5px 10px', fontSize: '0.76rem', gap: '5px' }} onClick={openNewService}><Plus size={13} /> Novo trabalho</button>
+                <button type="button" onClick={() => setMeetingFormOpen(true)} style={{ background: 'rgba(56,189,248,0.1)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.25)', padding: '8px 14px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}><Plus size={14} /> Marcar Reunião</button>
               </div>
 
-              {services.some((service) => service.status === 'ativo') && (() => {
-                const activeServices = services.filter((service) => service.status === 'ativo')
-                const fixedTotal = activeServices.filter((s) => s.tipo_honorario === 'fixo').reduce((sum, s) => sum + (s.honorario_valor || 0), 0)
-                const percentualCount = activeServices.filter((s) => s.tipo_honorario === 'percentual').length
-                return (
-                  <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(192,132,252,0.08)', border: '1px solid rgba(192,132,252,0.2)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      <span style={{ color: '#94a3b8', fontSize: '0.76rem', fontWeight: 700 }}>Honorarios fixos ativos</span>
-                      <strong style={{ color: '#c084fc', fontSize: '0.92rem' }}>{formatCurrency(fixedTotal)}</strong>
+              {meetingsLoading ? (
+                <div style={{ padding: '32px 24px', color: '#64748b', fontSize: '0.85rem', textAlign: 'center' }}>Carregando reuniões...</div>
+              ) : meetings.length === 0 ? (
+                <div style={{ padding: '32px 24px', background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: '16px', color: '#64748b', fontSize: '0.9rem', textAlign: 'center', fontWeight: 500 }}>Nenhuma reunião registrada no histórico.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {meetings.map((m) => (
+                    <div key={m.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.95rem' }}>{m.title}</div>
+                          <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '4px' }}>{formatDate(m.meeting_date)} {m.duration_min ? `· ${m.duration_min} min` : ''}</div>
+                        </div>
+                        <button type="button" onClick={() => handleDeleteMeeting(m.id)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}><Trash2 size={16} /></button>
+                      </div>
+                      {m.pauta && <div style={{ color: '#cbd5e1', fontSize: '0.85rem', lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px' }}>{m.pauta}</div>}
                     </div>
-                    {percentualCount > 0 && (
-                      <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>+ {percentualCount} trabalho{percentualCount === 1 ? '' : 's'} com honorario variavel (% sobre a base de calculo de cada um, veja a lista abaixo)</span>
-                    )}
-                  </div>
-                )
-              })()}
+                  ))}
+                </div>
+              )}
+            </div>
 
-              {serviceFormOpen && (
-                <div style={{ display: 'grid', gap: '10px', padding: '12px', borderRadius: '12px', background: 'rgba(192,132,252,0.06)', border: '1px solid rgba(192,132,252,0.15)' }}>
-                  <input className="input-field" placeholder="Nome do trabalho (ex: ICMS, Trabalhista, Consultoria)" value={serviceForm.nome} onChange={(e) => setServiceForm((f) => ({ ...f, nome: e.target.value }))} />
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setServiceForm((f) => ({ ...f, tipo_honorario: 'percentual' }))}
-                      style={{
-                        height: '38px', borderRadius: '8px', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer',
-                        border: `1px solid ${serviceForm.tipo_honorario === 'percentual' ? 'rgba(192,132,252,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                        background: serviceForm.tipo_honorario === 'percentual' ? 'rgba(192,132,252,0.18)' : 'rgba(255,255,255,0.04)',
-                        color: serviceForm.tipo_honorario === 'percentual' ? '#c084fc' : '#94a3b8',
-                      }}
-                    >
-                      Variavel (%)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setServiceForm((f) => ({ ...f, tipo_honorario: 'fixo' }))}
-                      style={{
-                        height: '38px', borderRadius: '8px', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer',
-                        border: `1px solid ${serviceForm.tipo_honorario === 'fixo' ? 'rgba(192,132,252,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                        background: serviceForm.tipo_honorario === 'fixo' ? 'rgba(192,132,252,0.18)' : 'rgba(255,255,255,0.04)',
-                        color: serviceForm.tipo_honorario === 'fixo' ? '#c084fc' : '#94a3b8',
-                      }}
-                    >
-                      Fixo (R$)
-                    </button>
-                  </div>
-                  {serviceForm.tipo_honorario === 'percentual' ? (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '8px' }}>
-                      <input className="input-field" type="number" step="0.01" placeholder="Ex: 5" value={serviceForm.honorario_percentual} onChange={(e) => setServiceForm((f) => ({ ...f, honorario_percentual: e.target.value }))} />
-                      <input className="input-field" placeholder="Sobre o que? Ex: ICMS recuperado no mes" value={serviceForm.base_calculo} onChange={(e) => setServiceForm((f) => ({ ...f, base_calculo: e.target.value }))} />
+            {/* LEFT: FILIAIS */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc', fontSize: '1.1rem', fontWeight: 900 }}>
+                  <Building2 size={20} color="#93c5fd" /> Filiais ({filiais.length})
+                </div>
+                <button type="button" onClick={openNewFilial} style={{ background: 'rgba(96,165,250,0.1)', color: '#93c5fd', border: '1px solid rgba(96,165,250,0.25)', padding: '8px 14px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}><Plus size={14} /> Nova filial</button>
+              </div>
+
+              {filiaisLoading ? (
+                <div style={{ padding: '32px 24px', color: '#64748b', fontSize: '0.85rem', textAlign: 'center' }}>Carregando filiais...</div>
+              ) : filiais.length === 0 ? (
+                <div style={{ padding: '32px 24px', background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: '16px', color: '#64748b', fontSize: '0.9rem', textAlign: 'center', fontWeight: 500 }}>Nenhuma filial cadastrada.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {filiais.map((filial) => (
+                    <div key={filial.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '16px', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                      <div>
+                        <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.95rem' }}>{filial.nome}</div>
+                        <div style={{ color: '#94a3b8', fontSize: '0.78rem', marginTop: '4px' }}>
+                          {[formatCnpj(filial.documento), [filial.cidade, filial.estado].filter(Boolean).join('/')].filter(Boolean).join(' · ') || 'Sem dados adicionais'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button type="button" onClick={() => openEditFilial(filial)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}><Edit3 size={15} /></button>
+                        <button type="button" onClick={() => handleDeleteFilial(filial.id)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}><Trash2 size={15} /></button>
+                      </div>
                     </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT COLUMN: CONTRACTS & SERVICES */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', height: '100%', minWidth: 0 }}>
+            {/* COLUMN: CONTRACTS & SERVICES */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc', fontSize: '1.1rem', fontWeight: 900 }}>
+                  <ShieldCheck size={20} color="#f59e0b" /> Contratos & Trabalhos
+                </div>
+                <button type="button" onClick={openNewService} style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)', padding: '8px 14px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}><Plus size={14} /> Adicionar</button>
+              </div>
+              
+              <div style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.08), rgba(0,0,0,0))', border: '1px solid rgba(34,197,94,0.2)', borderRadius: '16px', padding: '24px', display: 'grid', gap: '16px', minWidth: 0 }}>
+                <div>
+                  <div style={{ color: '#4ade80', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.05em' }}>Contrato Principal</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'end', gap: '16px' }}>
+                    <div style={{ color: '#f8fafc', fontSize: '1.4rem', fontWeight: 900 }}>{selectedRow.contractNumber || 'Ainda não gerado'}</div>
+                    <div style={{ textAlign: 'right', minWidth: '140px' }}>
+                      <div style={{ color: '#4ade80', fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{honorarioDisplay.label}</div>
+                      <div style={{ color: '#86efac', fontSize: '1.4rem', fontWeight: 900, overflowWrap: 'anywhere' }}>{honorarioDisplay.value}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <input className="input-field" placeholder="Numero do contrato" value={contractForm.contractNumber} onChange={(e) => setFormField('contractNumber', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                    <button type="button" onClick={() => setFormField('honorarioTipo', 'fixo')} style={{ flex: 1, padding: '10px', borderRadius: '10px', fontWeight: 800, fontSize: '0.78rem', cursor: 'pointer', border: `1px solid ${contractForm.honorarioTipo === 'fixo' ? 'rgba(74,222,128,0.5)' : 'rgba(255,255,255,0.1)'}`, background: contractForm.honorarioTipo === 'fixo' ? 'rgba(74,222,128,0.12)' : 'rgba(0,0,0,0.2)', color: contractForm.honorarioTipo === 'fixo' ? '#4ade80' : '#94a3b8' }}>Valor Fixo (R$)</button>
+                    <button type="button" onClick={() => setFormField('honorarioTipo', 'percentual')} style={{ flex: 1, padding: '10px', borderRadius: '10px', fontWeight: 800, fontSize: '0.78rem', cursor: 'pointer', border: `1px solid ${contractForm.honorarioTipo === 'percentual' ? 'rgba(74,222,128,0.5)' : 'rgba(255,255,255,0.1)'}`, background: contractForm.honorarioTipo === 'percentual' ? 'rgba(74,222,128,0.12)' : 'rgba(0,0,0,0.2)', color: contractForm.honorarioTipo === 'percentual' ? '#4ade80' : '#94a3b8' }}>Honorário Variável (%)</button>
+                  </div>
+                  {contractForm.honorarioTipo === 'fixo' ? (
+                    <input className="input-field" type="number" placeholder="Valor (R$)" value={contractForm.contractValue} onChange={(e) => setFormField('contractValue', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
                   ) : (
-                    <input className="input-field" type="number" step="0.01" placeholder="Valor mensal (R$)" value={serviceForm.honorario_valor} onChange={(e) => setServiceForm((f) => ({ ...f, honorario_valor: e.target.value }))} />
+                    <input className="input-field" type="number" placeholder="Percentual (ex: 15)" value={contractForm.contractPercentual} onChange={(e) => setFormField('contractPercentual', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
                   )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px' }}>
-                    <label style={{ display: 'grid', gap: '4px' }}>
-                      <span style={{ color: '#64748b', fontSize: '0.72rem' }}>Inicio</span>
-                      <input className="input-field" type="date" value={serviceForm.data_inicio} onChange={(e) => setServiceForm((f) => ({ ...f, data_inicio: e.target.value }))} />
-                    </label>
-                    <label style={{ display: 'grid', gap: '4px' }}>
-                      <span style={{ color: '#64748b', fontSize: '0.72rem' }}>Fim (se houver)</span>
-                      <input className="input-field" type="date" value={serviceForm.data_fim} onChange={(e) => setServiceForm((f) => ({ ...f, data_fim: e.target.value }))} />
-                    </label>
-                  </div>
-                  <select className="input-field" value={serviceForm.status} onChange={(e) => setServiceForm((f) => ({ ...f, status: e.target.value }))} style={{ background: 'var(--brand-surface)' }}>
-                    <option value="ativo">Ativo</option>
-                    <option value="pausado">Pausado</option>
-                    <option value="encerrado">Encerrado</option>
-                  </select>
-                  <textarea className="input-field" rows={2} placeholder="Observacoes" value={serviceForm.notas} onChange={(e) => setServiceForm((f) => ({ ...f, notas: e.target.value }))} />
-                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn-ghost" onClick={() => { setServiceFormOpen(false); setEditingServiceId(null) }}>Cancelar</button>
-                    <button type="button" className="btn-primary" onClick={handleSaveService} disabled={serviceSaving}><CheckCircle2 size={14} /> {serviceSaving ? 'Salvando...' : editingServiceId ? 'Salvar alteracoes' : 'Salvar trabalho'}</button>
-                  </div>
+                </div>
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+                  <label style={{ display: 'grid', gap: '4px' }}>
+                    <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Inicio</span>
+                    <input className="input-field" type="date" value={contractForm.startAt} onChange={(e) => setFormField('startAt', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+                  </label>
+                  <label style={{ display: 'grid', gap: '4px' }}>
+                    <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Assinado em</span>
+                    <input className="input-field" type="date" value={contractForm.signedAt} onChange={(e) => setFormField('signedAt', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+                  </label>
+                  <label style={{ display: 'grid', gap: '4px' }}>
+                    <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Vencimento</span>
+                    <input className="input-field" type="date" value={contractForm.validUntil} onChange={(e) => setFormField('validUntil', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+                  </label>
+                </div>
+                <textarea className="input-field" rows={2} placeholder="Notas do contrato" value={contractForm.notes} onChange={(e) => setFormField('notes', e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }} />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <button type="button" onClick={handleSaveContract} disabled={isPending} style={{ background: 'rgba(34,197,94,0.12)', color: '#86efac', border: '1px solid rgba(34,197,94,0.25)', padding: '9px 14px', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer' }}>Salvar Contrato</button>
+                  <button type="button" onClick={handleActivateContract} disabled={isPending} style={{ background: 'rgba(56,189,248,0.1)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.25)', padding: '9px 14px', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><CheckCircle2 size={14} /> Ativar</button>
+                  <button type="button" onClick={handleRenewContract} disabled={isPending} style={{ background: 'rgba(192,132,252,0.1)', color: '#c084fc', border: '1px solid rgba(192,132,252,0.25)', padding: '9px 14px', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><RefreshCcw size={14} /> Renovar</button>
+                  <button type="button" onClick={handleCancelContract} disabled={isPending} style={{ background: 'rgba(239,68,68,0.1)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.25)', padding: '9px 14px', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer' }}>Cancelar</button>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '14px' }}>
+                  <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" onChange={(e) => setSelectedPdfFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{ background: 'rgba(59,130,246,0.1)', color: '#93c5fd', border: '1px dashed rgba(147,197,253,0.4)', padding: '10px 14px', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flex: '1 1 220px' }}
+                  >
+                    <Upload size={14} /> {selectedPdfFile ? selectedPdfFile.name : selectedRow.pdfName ? 'Trocar PDF' : 'Escolher PDF'}
+                  </button>
+                  <button type="button" onClick={handleUploadPdf} disabled={isPending || !selectedPdfFile} style={{ background: selectedPdfFile ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.04)', color: selectedPdfFile ? '#86efac' : '#64748b', border: selectedPdfFile ? '1px solid rgba(34,197,94,0.25)' : '1px solid rgba(255,255,255,0.08)', padding: '10px 14px', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 800, cursor: selectedPdfFile ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> Enviar PDF</button>
+                  {selectedPdfPreview && <a href={selectedPdfPreview} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', fontSize: '0.75rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}><ExternalLink size={12} /> Abrir selecionado</a>}
+                </div>
+              </div>
+
+              {services.length > 0 && (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {servicesLoading && <div style={{ color: '#64748b', fontSize: '0.78rem' }}>Atualizando trabalhos...</div>}
+                  {services.map((s) => (
+                    <div key={s.id} style={{ background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: '16px', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                      <div>
+                        <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.95rem' }}>{s.nome}</div>
+                        <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginTop: '4px' }}>Status: {s.status}</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ color: '#f59e0b', fontWeight: 900, fontSize: '1.1rem' }}>
+                          {s.tipo_honorario === 'fixo' ? formatCurrency(s.honorario_valor || 0) : `${s.honorario_percentual}%`}
+                        </div>
+                        <button type="button" onClick={() => openEditService(s)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}><Edit3 size={15} /></button>
+                        <button type="button" onClick={() => handleDeleteService(s.id)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}><Trash2 size={15} /></button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-
-              {services.length === 0 && !servicesLoading && !serviceFormOpen && (
-                <div style={{ padding: '12px', borderRadius: '12px', border: '1px dashed rgba(148,163,184,0.18)', color: '#94a3b8', fontSize: '0.78rem' }}>Nenhum trabalho/servico cadastrado para este cliente ainda.</div>
-              )}
-
-              {services.map((service) => (
-                <div key={service.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', borderRadius: '12px', border: '1px solid rgba(192,132,252,0.15)', background: 'rgba(192,132,252,0.04)' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.84rem' }}>{service.nome}</span>
-                      <span style={{
-                        padding: '2px 8px', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 800, textTransform: 'uppercase',
-                        color: service.status === 'ativo' ? '#86efac' : service.status === 'pausado' ? '#fbbf24' : '#94a3b8',
-                        background: service.status === 'ativo' ? 'rgba(34,197,94,0.12)' : service.status === 'pausado' ? 'rgba(251,191,36,0.12)' : 'rgba(148,163,184,0.12)',
-                      }}>
-                        {service.status}
-                      </span>
-                    </div>
-                    <div style={{ color: '#94a3b8', fontSize: '0.72rem', marginTop: '2px' }}>
-                      {[
-                        service.tipo_honorario === 'fixo'
-                          ? (service.honorario_valor ? `${formatCurrency(service.honorario_valor)}/mes` : null)
-                          : (service.honorario_percentual ? `${service.honorario_percentual}% ${service.base_calculo ? `sobre ${service.base_calculo}` : '(variavel)'}` : null),
-                        service.data_inicio ? `desde ${formatDate(service.data_inicio)}` : null,
-                        service.data_fim ? `ate ${formatDate(service.data_fim)}` : null,
-                      ].filter(Boolean).join(' · ') || 'Sem honorario definido'}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                    <button type="button" className="btn-ghost" style={{ padding: '4px 8px' }} aria-label={`Editar trabalho ${service.nome}`} onClick={() => openEditService(service)}><Edit3 size={13} /></button>
-                    <button type="button" className="btn-ghost" style={{ padding: '4px 8px', color: '#f87171' }} aria-label={`Excluir trabalho ${service.nome}`} onClick={() => handleDeleteService(service.id)}><Trash2 size={13} /></button>
-                  </div>
-                </div>
-              ))}
             </div>
-          )}
+
+
+          </div>
         </div>
       </div>
 
-      {callModalOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 700 }} onClick={(e) => { if (e.target === e.currentTarget) setCallModalOpen(false) }}>
-          <div style={{ background: '#161b22', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '420px', display: 'grid', gap: '16px' }}>
-            <div style={{ fontWeight: 800, color: '#f8fafc', fontSize: '0.95rem' }}>Registrar ligacao</div>
-            <select className="input-field" value={callForm.outcome} onChange={(e) => setCallForm((f) => ({ ...f, outcome: e.target.value as CallOutcome }))} style={{ background: 'var(--brand-surface)' }}><option value="atendeu">Atendeu</option><option value="nao_atendeu">Nao atendeu</option><option value="recado">Deixou recado</option><option value="reagendado">Reagendado</option></select>
-            <input className="input-field" type="number" placeholder="Duração (min)" value={callForm.durationMin} onChange={(e) => setCallForm((f) => ({ ...f, durationMin: e.target.value }))} />
-            <input className="input-field" placeholder="Link da gravação" value={callForm.recordingUrl} onChange={(e) => setCallForm((f) => ({ ...f, recordingUrl: e.target.value }))} />
-            <textarea className="input-field" rows={2} placeholder="Observações" value={callForm.notes} onChange={(e) => setCallForm((f) => ({ ...f, notes: e.target.value }))} />
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn-ghost" onClick={() => setCallModalOpen(false)}>Cancelar</button>
-              <button type="button" className="btn-primary" onClick={handleLogCall} disabled={callPending}>{callPending ? <Loader2 size={14} className="animate-spin" /> : <Phone size={14} />} Salvar</button>
+      {/* MODAL: FILIAL */}
+      {filialFormOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 700 }} onClick={(e) => { if (e.target === e.currentTarget) setFilialFormOpen(false) }}>
+          <div style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', padding: '32px', width: '100%', maxWidth: '450px', display: 'grid', gap: '20px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
+            <div style={{ fontWeight: 900, color: '#f8fafc', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}><Building2 size={20} color="#93c5fd" /> {editingFilialId ? 'Editar Filial' : 'Nova Filial'}</div>
+            <input className="input-field" placeholder="Nome da filial" value={filialForm.nome} onChange={(e) => setFilialForm((f) => ({ ...f, nome: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+            <input className="input-field" placeholder="00.000.000/0001-00" value={filialForm.documento} onChange={(e) => setFilialForm((f) => ({ ...f, documento: formatCnpj(e.target.value) }))} inputMode="numeric" style={{ background: 'rgba(0,0,0,0.2)' }} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <input className="input-field" placeholder="Cidade" value={filialForm.cidade} onChange={(e) => setFilialForm((f) => ({ ...f, cidade: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              <input className="input-field" placeholder="Estado (UF)" maxLength={2} value={filialForm.estado} onChange={(e) => setFilialForm((f) => ({ ...f, estado: e.target.value.toUpperCase() }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
+              <button type="button" onClick={() => setFilialFormOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontWeight: 700, padding: '10px 16px', cursor: 'pointer' }}>Cancelar</button>
+              <button type="button" onClick={handleSaveFilial} disabled={filialSaving} style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(59,130,246,0.3)' }}>{filialSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />} Salvar Filial</button>
             </div>
           </div>
         </div>
       )}
+
+      {/* MODAL: REGISTRAR LIGAÇÃO */}
+      {callModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 700 }} onClick={(e) => { if (e.target === e.currentTarget) setCallModalOpen(false) }}>
+          <div style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', padding: '32px', width: '100%', maxWidth: '450px', display: 'grid', gap: '20px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
+            <div style={{ fontWeight: 900, color: '#f8fafc', fontSize: '1.2rem' }}>Registrar Ligação</div>
+            <select className="input-field" value={callForm.outcome} onChange={(e) => setCallForm((f) => ({ ...f, outcome: e.target.value as CallOutcome }))} style={{ background: 'rgba(0,0,0,0.2)' }}><option value="atendeu">Atendeu</option><option value="nao_atendeu">Nao atendeu</option><option value="recado">Deixou recado</option><option value="reagendado">Reagendado</option></select>
+            <input className="input-field" type="number" placeholder="Duração (minutos)" value={callForm.durationMin} onChange={(e) => setCallForm((f) => ({ ...f, durationMin: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }}/>
+            <input className="input-field" placeholder="Link da gravação (Opcional)" value={callForm.recordingUrl} onChange={(e) => setCallForm((f) => ({ ...f, recordingUrl: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }}/>
+            <textarea className="input-field" rows={3} placeholder="Anotações da ligação" value={callForm.notes} onChange={(e) => setCallForm((f) => ({ ...f, notes: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }}/>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
+              <button type="button" onClick={() => setCallModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontWeight: 700, padding: '10px 16px', cursor: 'pointer' }}>Cancelar</button>
+              <button type="button" onClick={handleLogCall} disabled={callPending} style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(59,130,246,0.3)' }}>{callPending ? <Loader2 size={16} className="animate-spin" /> : <Phone size={16} />} Salvar Registro</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: MARCAR REUNIÃO */}
+      {meetingFormOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 700 }} onClick={(e) => { if (e.target === e.currentTarget) setMeetingFormOpen(false) }}>
+          <div style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', padding: '32px', width: '100%', maxWidth: '550px', display: 'grid', gap: '20px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
+            <div style={{ fontWeight: 900, color: '#f8fafc', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}><Video size={20} color="#38bdf8" /> Agendar Reunião</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <input className="input-field" type="date" value={meetingForm.meeting_date} onChange={(e) => setMeetingForm((f) => ({ ...f, meeting_date: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+              <input className="input-field" placeholder="Título da reunião" value={meetingForm.title} onChange={(e) => setMeetingForm((f) => ({ ...f, title: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+            </div>
+            <textarea className="input-field" rows={4} placeholder="Pauta ou Notas..." value={meetingForm.pauta} onChange={(e) => setMeetingForm((f) => ({ ...f, pauta: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button type="button" onClick={handleGeneratePauta} disabled={pautaLoading} style={{ background: 'rgba(168,85,247,0.1)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)', padding: '8px 14px', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {pautaLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Gerar pauta com IA
+              </button>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#94a3b8', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', padding: '8px 14px', borderRadius: '10px' }}>
+                {audioUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Transcrever áudio ou vídeo
+                <input type="file" accept="audio/*,video/*" onChange={handleUploadAudio} disabled={audioUploading} style={{ display: 'none' }} />
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
+              <button type="button" onClick={() => setMeetingFormOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontWeight: 700, padding: '10px 16px', cursor: 'pointer' }}>Cancelar</button>
+              <button type="button" onClick={handleSaveMeeting} disabled={isPending} style={{ background: 'linear-gradient(135deg, #38bdf8, #0ea5e9)', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(56,189,248,0.3)' }}><CheckCircle2 size={16} /> Confirmar Reunião</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: NOVO SERVIÇO */}
+      {serviceFormOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 700 }} onClick={(e) => { if (e.target === e.currentTarget) setServiceFormOpen(false) }}>
+          <div style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', padding: '32px', width: '100%', maxWidth: '500px', display: 'grid', gap: '20px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
+            <div style={{ fontWeight: 900, color: '#f8fafc', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldCheck size={20} color="#c084fc" /> Novo Trabalho/Contrato</div>
+            <input className="input-field" placeholder="Nome do Serviço (ex: Trabalhista)" value={serviceForm.nome} onChange={(e) => setServiceForm((f) => ({ ...f, nome: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <button type="button" onClick={() => setServiceForm((f) => ({ ...f, tipo_honorario: 'fixo' }))} style={{ padding: '12px', borderRadius: '10px', fontWeight: 800, border: `1px solid ${serviceForm.tipo_honorario === 'fixo' ? '#c084fc' : 'rgba(255,255,255,0.1)'}`, background: serviceForm.tipo_honorario === 'fixo' ? 'rgba(192,132,252,0.1)' : 'rgba(0,0,0,0.2)', color: serviceForm.tipo_honorario === 'fixo' ? '#c084fc' : '#94a3b8' }}>Valor Fixo</button>
+              <button type="button" onClick={() => setServiceForm((f) => ({ ...f, tipo_honorario: 'percentual' }))} style={{ padding: '12px', borderRadius: '10px', fontWeight: 800, border: `1px solid ${serviceForm.tipo_honorario === 'percentual' ? '#c084fc' : 'rgba(255,255,255,0.1)'}`, background: serviceForm.tipo_honorario === 'percentual' ? 'rgba(192,132,252,0.1)' : 'rgba(0,0,0,0.2)', color: serviceForm.tipo_honorario === 'percentual' ? '#c084fc' : '#94a3b8' }}>Percentual (%)</button>
+            </div>
+            {serviceForm.tipo_honorario === 'fixo' ? (
+              <input className="input-field" type="number" placeholder="Valor (R$)" value={serviceForm.honorario_valor} onChange={(e) => setServiceForm((f) => ({ ...f, honorario_valor: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+            ) : (
+              <input className="input-field" type="number" placeholder="Percentual (ex: 15)" value={serviceForm.honorario_percentual} onChange={(e) => setServiceForm((f) => ({ ...f, honorario_percentual: e.target.value }))} style={{ background: 'rgba(0,0,0,0.2)' }} />
+            )}
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
+              <button type="button" onClick={() => setServiceFormOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontWeight: 700, padding: '10px 16px', cursor: 'pointer' }}>Cancelar</button>
+              <button type="button" onClick={handleSaveService} disabled={serviceSaving} style={{ background: 'linear-gradient(135deg, #a855f7, #9333ea)', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(168,85,247,0.3)' }}><CheckCircle2 size={16} /> Salvar Serviço</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
+

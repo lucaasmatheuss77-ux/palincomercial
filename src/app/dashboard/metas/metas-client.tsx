@@ -256,8 +256,7 @@ export default function MetasClient({
   ]
 
   return (
-    <div style={{ display: 'grid', gap: '20px' }}>
-      {/* Header */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--brand-text)', letterSpacing: '-0.02em' }}>Metas</h1>

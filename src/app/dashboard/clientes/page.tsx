@@ -10,6 +10,10 @@ type ClientRecord = {
   name: string
   company_name: string | null
   documento: string | null
+  segmento: string | null
+  cidade: string | null
+  estado: string | null
+  notas: string | null
   email: string | null
   phone: string | null
   whatsapp: string | null
@@ -245,7 +249,7 @@ async function createSignedUrlMap(
         const { data } = await supabase.storage.from(target.bucket).createSignedUrl(target.path, 60 * 60)
         return [`${target.bucket}:${target.path}`, data?.signedUrl || null] as const
       } catch (error) {
-        console.warn('Nao foi possivel gerar URL assinada do contrato:', target.bucket, target.path, error)
+        console.warn('Não foi possível gerar URL assinada do contrato:', target.bucket, target.path, error)
         return [`${target.bucket}:${target.path}`, null] as const
       }
     })
@@ -324,7 +328,7 @@ export default async function ClientesPage({
   try {
     const queryResults = await Promise.allSettled([
       supabase.from('clientes').select('*').order('updated_at', { ascending: false }),
-      supabase.from('leads').select('id, name, email, phone, whatsapp, created_at').limit(10000),
+      supabase.from('leads').select('id, name, company, email, phone, whatsapp, created_at').limit(10000),
       supabase.from('contracts').select(
         'id, deal_id, lead_id, client_id, product_id, consultant_id, contract_number, status, value, start_date, end_date, signed_at, notes, pdf_bucket, pdf_path, pdf_file_name, pdf_mime_type, pdf_uploaded_at, cancellation_reason, created_at, updated_at'
       ),
@@ -509,12 +513,18 @@ export default async function ClientesPage({
       leadId: client.origin_lead_id,
       dealId: contract?.deal_id || (client.origin_lead_id ? dealByLead.get(client.origin_lead_id) || null : null),
       contractId: contract?.id || null,
-      name: client.name || lead?.name || 'Sem nome',
+      name: client.company_name || lead?.company || client.name || lead?.name || 'Sem nome',
       company: client.company_name || lead?.company || '',
+      contactName: client.name || lead?.name || '',
+      razaoSocial: client.company_name || lead?.company || '',
       email: client.email || lead?.email || '',
       phone: client.phone || lead?.phone || '',
       whatsapp: client.whatsapp || lead?.whatsapp || '',
       document: client.documento || '',
+      segmento: client.segmento || '',
+      cidade: client.cidade || '',
+      estado: client.estado || '',
+      notas: client.notas || '',
       product,
       consultant,
       sourceLabel: contract ? 'Contrato vinculado' : 'Cliente criado no lead',

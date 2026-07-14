@@ -4,9 +4,13 @@
 
 import { readFileSync } from 'fs'
 
-const PROJECT_REF = 'bjdjgnfxbacbbmbqnuxj'
-const SERVICE_ROLE_KEY = 'sb_secret_NKSgQDsMZqqAhiTyQAzvwQ_f9vdkhFe'
-const SUPABASE_URL = `https://${PROJECT_REF}.supabase.co`
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+  console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.')
+  process.exit(1)
+}
 
 async function executeSql(sql, label) {
   console.log(`\n📦 Executing: ${label}`)

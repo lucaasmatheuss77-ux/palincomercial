@@ -135,15 +135,21 @@ export async function deleteIcmsOperation(id: string) {
   return { success: true }
 }
 
-export async function closeIcmsMonthForClient(data: { monthYear: string; cliente: string }) {
+export async function closeIcmsMonthForClient(data: { monthYear: string; cliente?: string; empresa?: string }) {
   const supabase = await createClient()
 
-  const { data: updatedOps, error } = await supabase
+  let query = supabase
     .from('icms_operations')
     .update({ status_fechamento: 'Closed', updated_at: new Date().toISOString() })
     .eq('month_year', data.monthYear)
-    .eq('cliente', data.cliente)
-    .select('id')
+
+  if (data.empresa) {
+    query = query.eq('empresa', data.empresa)
+  } else if (data.cliente) {
+    query = query.eq('cliente', data.cliente)
+  }
+
+  const { data: updatedOps, error } = await query.select('id')
 
   if (error) {
     console.error('Error closing ICMS month:', error)

@@ -8,10 +8,13 @@ import {
   ChevronRight,
   ClipboardList,
   ExternalLink,
+  Loader2,
   MapPin,
   Plus,
   Search,
+  Sparkles,
   Truck,
+  Upload,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import ActionDialog from '@/components/action-dialog'
@@ -171,6 +174,10 @@ export default function AgendaManager({
     notes: '', next_step: '', next_contact_at: '', owner_profile_id: '',
     requires_logistics: false,
   })
+  const [showMeetingFollowUp, setShowMeetingFollowUp] = useState(false)
+  const [meetingPautaLoading, setMeetingPautaLoading] = useState(false)
+  const [meetingNextStepLoading, setMeetingNextStepLoading] = useState(false)
+  const [meetingAudioUploading, setMeetingAudioUploading] = useState(false)
   const [taskForm, setTaskForm] = useState({
     title: '', due_at: '', priority: 'Media', owner_profile_id: '', meeting_id: '',
   })
@@ -224,6 +231,80 @@ export default function AgendaManager({
       notes: '', next_step: '', next_contact_at: '', owner_profile_id: '',
       requires_logistics: false,
     })
+    setShowMeetingFollowUp(false)
+  }
+
+  function addMinutesToDateTimeLocal(value: string, minutes: number) {
+    if (!value) return ''
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    date.setMinutes(date.getMinutes() + minutes)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  }
+
+  async function handleGenerateMeetingPauta() {
+    setMeetingPautaLoading(true)
+    try {
+      const response = await fetch('/api/assistant/pauta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientName: meetingForm.client_name || meetingForm.title || 'Cliente', recordingLink: '', additionalContext: meetingForm.title || '' }),
+      })
+      const data = await response.json() as { pauta?: string; error?: string }
+      if (!response.ok || data.error) { toast.error(data.error || 'Erro ao gerar pauta.'); return }
+      setMeetingForm((current) => ({ ...current, objective: data.pauta || current.objective }))
+      toast.success('Pauta gerada pela IA. Revise antes de salvar.')
+    } catch {
+      toast.error('Falha ao conectar com a IA.')
+    } finally {
+      setMeetingPautaLoading(false)
+    }
+  }
+
+  async function handleSuggestNextStep() {
+    setMeetingNextStepLoading(true)
+    try {
+      const response = await fetch('/api/assistant/next-step', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientName: meetingForm.client_name || meetingForm.title || 'Cliente', objective: meetingForm.objective || '', notes: meetingForm.notes || '' }),
+      })
+      const data = await response.json() as { next_step?: string; error?: string }
+      if (!response.ok || data.error) { toast.error(data.error || 'Erro ao sugerir proximo passo.'); return }
+      setMeetingForm((current) => ({ ...current, next_step: data.next_step || current.next_step }))
+      toast.success('Sugestão da IA aplicada. Revise antes de salvar.')
+    } catch {
+      toast.error('Falha ao conectar com a IA.')
+    } finally {
+      setMeetingNextStepLoading(false)
+    }
+  }
+
+  async function handleUploadMeetingRecording(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setMeetingAudioUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('audio', file)
+      formData.append('client_id', meetingForm.client_id || '')
+      const response = await fetch('/api/meetings/transcribe', { method: 'POST', body: formData })
+      const data = await response.json() as { transcription?: string; summary?: string; action_items?: string[]; error?: string }
+      if (!response.ok || data.error) { toast.error(data.error || 'Erro ao transcrever a gravação.'); return }
+      setMeetingForm((current) => ({
+        ...current,
+        notes: data.summary ? (current.notes ? `${current.notes}\n\nResumo IA:\n${data.summary}` : `Resumo IA:\n${data.summary}`) : current.notes,
+        next_step: data.action_items && data.action_items.length > 0 ? data.action_items.join('\n') : current.next_step,
+      }))
+      setShowMeetingFollowUp(true)
+      toast.success('Gravação transcrita e resumida pela IA!')
+    } catch {
+      toast.error('Falha ao enviar o arquivo.')
+    } finally {
+      setMeetingAudioUploading(false)
+      event.target.value = ''
+    }
   }
 
   function handleCreateMeeting() {
@@ -743,45 +824,185 @@ export default function AgendaManager({
       <ActionDialog
         open={meetingOpen}
         title="Nova reunião comercial"
-        subtitle="Registre pauta, o que foi falado e o próximo contato."
+        subtitle="Agende a reunião e defina a pauta com o cliente."
         onClose={() => setMeetingOpen(false)}
+        width="620px"
         footer={
           <>
             <button type="button" className="btn-ghost" onClick={() => setMeetingOpen(false)}>Cancelar</button>
-            <button type="button" className="btn-primary" onClick={handleCreateMeeting} disabled={isPending}>Salvar reunião</button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleCreateMeeting}
+              disabled={isPending || !meetingForm.title.trim() || !meetingForm.scheduled_for}
+            >
+              <CalendarDays size={16} />
+              Agendar reunião
+            </button>
           </>
         }
       >
-        <div style={{ display: 'grid', gap: '12px' }}>
-          <input className="input-field" placeholder="Título da reunião *" value={meetingForm.title} onChange={e => setMeetingForm(c => ({ ...c, title: e.target.value }))} />
-          <ClientSearchField
-            clientes={clientes}
-            selected={meetingForm.client_id ? { id: meetingForm.client_id, nome: meetingForm.client_name } : null}
-            onSelect={(cliente) => setMeetingForm(c => ({ ...c, client_id: cliente.id, client_name: cliente.nome }))}
-            onClear={() => setMeetingForm(c => ({ ...c, client_id: '', client_name: '' }))}
-            placeholder="Vincular a um cliente cadastrado"
-          />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <input className="input-field" type="datetime-local" value={meetingForm.scheduled_for} onChange={e => setMeetingForm(c => ({ ...c, scheduled_for: e.target.value }))} />
-            <input className="input-field" type="datetime-local" value={meetingForm.ends_at} onChange={e => setMeetingForm(c => ({ ...c, ends_at: e.target.value }))} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <input className="input-field" placeholder="Local ou link" value={meetingForm.location} onChange={e => setMeetingForm(c => ({ ...c, location: e.target.value }))} />
-            <select className="input-field" value={meetingForm.meeting_type} onChange={e => setMeetingForm(c => ({ ...c, meeting_type: e.target.value }))}>
-              {['Presencial', 'Online', 'Externa'].map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
-          </div>
-          <select className="input-field" value={meetingForm.owner_profile_id} onChange={e => setMeetingForm(c => ({ ...c, owner_profile_id: e.target.value }))}>
-            <option value="">Responsável</option>
-            {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-          </select>
-          <textarea className="input-field" rows={3} placeholder="Pauta da reunião" value={meetingForm.objective} onChange={e => setMeetingForm(c => ({ ...c, objective: e.target.value }))} />
-          <textarea className="input-field" rows={2} placeholder="Próximo passo" value={meetingForm.next_step} onChange={e => setMeetingForm(c => ({ ...c, next_step: e.target.value }))} />
-          <input className="input-field" type="datetime-local" value={meetingForm.next_contact_at} onChange={e => setMeetingForm(c => ({ ...c, next_contact_at: e.target.value }))} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontSize: '0.85rem', cursor: 'pointer' }}>
-            <input type="checkbox" checked={meetingForm.requires_logistics} onChange={e => setMeetingForm(c => ({ ...c, requires_logistics: e.target.checked }))} />
-            Precisa de apoio logístico (reservar carro)
+        <div style={{ display: 'grid', gap: '22px' }}>
+          <label style={{ display: 'grid', gap: '6px' }}>
+            <span className="meeting-field-label">Título da reunião</span>
+            <input className="input-field" placeholder="Ex.: Apresentação de proposta" value={meetingForm.title} onChange={e => setMeetingForm(c => ({ ...c, title: e.target.value }))} />
           </label>
+
+          <label style={{ display: 'grid', gap: '6px' }}>
+            <span className="meeting-field-label">Cliente</span>
+            <ClientSearchField
+              clientes={clientes}
+              selected={meetingForm.client_id ? { id: meetingForm.client_id, nome: meetingForm.client_name } : null}
+              onSelect={(cliente) => setMeetingForm(c => ({ ...c, client_id: cliente.id, client_name: cliente.nome }))}
+              onClear={() => setMeetingForm(c => ({ ...c, client_id: '', client_name: '' }))}
+              placeholder="Vincular a um cliente cadastrado"
+            />
+          </label>
+
+          <div style={{ display: 'grid', gap: '10px' }}>
+            <span className="meeting-section-label" style={{ color: '#60a5fa' }}>Quando</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span className="meeting-field-label">Início</span>
+                <input className="input-field" type="datetime-local" value={meetingForm.scheduled_for} onChange={e => setMeetingForm(c => ({ ...c, scheduled_for: e.target.value }))} />
+              </label>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span className="meeting-field-label">Término</span>
+                <input className="input-field" type="datetime-local" value={meetingForm.ends_at} onChange={e => setMeetingForm(c => ({ ...c, ends_at: e.target.value }))} />
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {[
+                { minutes: 30, label: '30 min' },
+                { minutes: 60, label: '1h' },
+                { minutes: 90, label: '1h30' },
+                { minutes: 120, label: '2h' },
+              ].map((option) => (
+                <button
+                  key={option.minutes}
+                  type="button"
+                  className="meeting-chip"
+                  disabled={!meetingForm.scheduled_for}
+                  onClick={() => setMeetingForm(c => ({ ...c, ends_at: addMinutesToDateTimeLocal(c.scheduled_for, option.minutes) }))}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gap: '10px' }}>
+            <span className="meeting-section-label" style={{ color: '#86efac' }}>Onde e como</span>
+            <label style={{ display: 'grid', gap: '6px' }}>
+              <span className="meeting-field-label">Local ou link</span>
+              <input className="input-field" placeholder="Endereço, Google Meet, telefone..." value={meetingForm.location} onChange={e => setMeetingForm(c => ({ ...c, location: e.target.value }))} />
+            </label>
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <span className="meeting-field-label">Formato</span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {['Presencial', 'Online', 'Externa'].map((option) => {
+                  const active = meetingForm.meeting_type === option
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setMeetingForm(c => ({ ...c, meeting_type: option }))}
+                      style={{
+                        flex: 1, padding: '9px 8px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer',
+                        border: `1px solid ${active ? 'rgba(134,239,172,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                        background: active ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.03)',
+                        color: active ? '#86efac' : '#94a3b8', transition: 'all 0.15s',
+                      }}
+                    >
+                      {option}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <label style={{ display: 'grid', gap: '6px' }}>
+              <span className="meeting-field-label">Responsável</span>
+              <select className="input-field" value={meetingForm.owner_profile_id} onChange={e => setMeetingForm(c => ({ ...c, owner_profile_id: e.target.value }))}>
+                <option value="">Selecione o responsável</option>
+                {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#cbd5e1', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <input type="checkbox" checked={meetingForm.requires_logistics} onChange={e => setMeetingForm(c => ({ ...c, requires_logistics: e.target.checked }))} />
+              Precisa de apoio logístico (reservar carro)
+            </label>
+          </div>
+
+          <div style={{ display: 'grid', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span className="meeting-section-label" style={{ color: 'var(--brand-primary)' }}>Pauta da reunião</span>
+              <button
+                type="button"
+                onClick={() => void handleGenerateMeetingPauta()}
+                disabled={meetingPautaLoading}
+                className="meeting-chip"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                {meetingPautaLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Gerar com IA
+              </button>
+            </div>
+            <textarea className="input-field" rows={3} placeholder="O que será tratado nesta reunião?" value={meetingForm.objective} onChange={e => setMeetingForm(c => ({ ...c, objective: e.target.value }))} />
+          </div>
+
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px' }}>
+            <button
+              type="button"
+              onClick={() => setShowMeetingFollowUp((value) => !value)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                color: '#93c5fd', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em',
+              }}
+            >
+              <ChevronRight size={14} style={{ transform: showMeetingFollowUp ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+              Registrar conversa e próximo passo (opcional)
+            </button>
+            {showMeetingFollowUp ? (
+              <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
+                <p style={{ color: '#64748b', fontSize: '0.76rem', lineHeight: 1.5, margin: 0 }}>
+                  Preencha estes campos depois que a reunião acontecer, ou deixe em branco por enquanto.
+                </p>
+                <label
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '8px', cursor: meetingAudioUploading ? 'wait' : 'pointer',
+                    color: '#93c5fd', fontSize: '0.78rem', fontWeight: 700, background: 'rgba(96,165,250,0.08)',
+                    border: '1px solid rgba(96,165,250,0.2)', padding: '10px 14px', borderRadius: '10px', width: 'fit-content',
+                  }}
+                >
+                  {meetingAudioUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  Enviar áudio ou vídeo da reunião (a IA resume)
+                  <input type="file" accept="audio/*,video/*" onChange={(event) => void handleUploadMeetingRecording(event)} disabled={meetingAudioUploading} style={{ display: 'none' }} />
+                </label>
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span className="meeting-field-label">O que foi falado</span>
+                  <textarea className="input-field" rows={3} placeholder="Resumo da conversa" value={meetingForm.notes} onChange={e => setMeetingForm(c => ({ ...c, notes: e.target.value }))} />
+                </label>
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                    <span className="meeting-field-label">Próximo passo comercial</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleSuggestNextStep()}
+                      disabled={meetingNextStepLoading}
+                      className="meeting-chip"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      {meetingNextStepLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Sugerir com IA
+                    </button>
+                  </div>
+                  <textarea className="input-field" rows={2} placeholder="Qual a próxima ação com este cliente?" value={meetingForm.next_step} onChange={e => setMeetingForm(c => ({ ...c, next_step: e.target.value }))} />
+                </label>
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span className="meeting-field-label">Próximo contato agendado</span>
+                  <input className="input-field" type="datetime-local" value={meetingForm.next_contact_at} onChange={e => setMeetingForm(c => ({ ...c, next_contact_at: e.target.value }))} />
+                </label>
+              </div>
+            ) : null}
+          </div>
         </div>
       </ActionDialog>
 

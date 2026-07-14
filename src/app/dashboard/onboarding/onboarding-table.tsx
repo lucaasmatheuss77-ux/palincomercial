@@ -11,6 +11,7 @@ import {
   FileText,
   Landmark,
   Laptop,
+  Mail,
   MessageCircle,
   Phone,
   Search,
@@ -26,6 +27,10 @@ type ClientOnboarding = {
   id: string
   name: string
   company_name: string | null
+  documento: string | null
+  email: string | null
+  phone: string | null
+  whatsapp: string | null
   product: string
   contract_date: string
   filiais: Filial[]
@@ -61,6 +66,8 @@ const TRACKS: Track[] = [
     color: '#eab308',
     terms: ['tribut', 'icms', 'pis', 'cofins', 'fiscal', 'crédito', 'credito', 'cat', 'rural', 'dca'],
     tasks: [
+      { key: 'welcome_email', label: 'Email de boas-vindas enviado', detail: 'Enviar orientação inicial, contato responsável e próximos passos.', points: 20 },
+      { key: 'contact_confirmed', label: 'Contato responsável confirmado', detail: 'Validar nome, telefone, WhatsApp e melhor canal da empresa.', points: 20 },
       { key: 'contract', label: 'Contrato conferido', detail: 'Objeto, assinatura, filial e responsável confirmados.', points: 30 },
       { key: 'tax_scope', label: 'Escopo tributário validado', detail: 'Produto, crédito, regime e documentos necessários.', points: 35 },
       { key: 'kickoff', label: 'Kickoff técnico marcado', detail: 'Primeira reunião com pauta e donos definidos.', points: 25 },
@@ -74,6 +81,7 @@ const TRACKS: Track[] = [
     color: '#22c55e',
     terms: ['tech', 'tecnolog', 'software', 'sistema', 'automação', 'automacao', 'dados'],
     tasks: [
+      { key: 'welcome_email', label: 'Email de boas-vindas enviado', detail: 'Enviar canais, acessos e responsável pelo início.', points: 20 },
       { key: 'access', label: 'Acessos configurados', detail: 'Sistema, pastas e canal de atendimento.', points: 25 },
       { key: 'documents', label: 'Documentos recebidos', detail: 'Checklist documental mínimo validado.', points: 30 },
       { key: 'data_room', label: 'Ambiente organizado', detail: 'Arquivos e responsáveis padronizados.', points: 20 },
@@ -87,6 +95,7 @@ const TRACKS: Track[] = [
     color: '#c084fc',
     terms: ['psic', 'mental', 'integramente', 'nr1', 'nr-1', 'bem-estar', 'bem estar'],
     tasks: [
+      { key: 'welcome_email', label: 'Email de boas-vindas enviado', detail: 'Enviar agenda inicial, canal oficial e combinados.', points: 20 },
       { key: 'expectations', label: 'Expectativas alinhadas', detail: 'Riscos, tempo e critérios sem promessa frouxa.', points: 30 },
       { key: 'sponsor', label: 'Patrocinador mapeado', detail: 'Quem decide e quem operacionaliza.', points: 20 },
       { key: 'confidence', label: 'Canal de confiança', detail: 'Cliente sabe quem chamar e quando.', points: 20 },
@@ -116,6 +125,24 @@ function getInitials(value: string) {
 function getTrackForClient(client: ClientOnboarding): Track {
   const haystack = `${client.product} ${client.company_name || ''} ${client.name}`.toLowerCase()
   return TRACKS.find((track) => track.terms.some((term) => haystack.includes(term))) || TRACKS[0]
+}
+
+function onlyDigits(value?: string | null) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+function getMailto(client: ClientOnboarding, track: Track) {
+  const subject = encodeURIComponent(`Onboarding Palin - ${client.company_name || client.name}`)
+  const body = encodeURIComponent(
+    `Olá, ${client.name}.\n\nVamos iniciar seu onboarding de ${track.label}. Seguem os próximos passos:\n\n1. confirmar o contato responsável;\n2. validar documentos e escopo;\n3. agendar o kickoff.\n\nFico à disposição.`
+  )
+  return `mailto:${client.email || ''}?subject=${subject}&body=${body}`
+}
+
+function getWhatsAppLink(client: ClientOnboarding, track: Track) {
+  const phone = onlyDigits(client.whatsapp || client.phone)
+  const text = encodeURIComponent(`Olá, ${client.name}. Vamos iniciar seu onboarding de ${track.label}. Pode confirmar o responsável e o melhor horário para alinharmos os próximos passos?`)
+  return phone ? `https://wa.me/55${phone}?text=${text}` : '#'
 }
 
 export default function OnboardingTable({ clients }: { clients: ClientOnboarding[] }) {
@@ -372,12 +399,43 @@ export default function OnboardingTable({ clients }: { clients: ClientOnboarding
                 <p style={{ color: 'var(--brand-muted)', fontSize: '0.86rem', marginTop: 4 }}>
                   {selectedClient.company_name || 'Sem empresa informada'} · contrato em {formatDate(selectedClient.contract_date)}
                 </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                  {selectedClient.documento && <span className="badge">CNPJ/CPF {selectedClient.documento}</span>}
+                  {selectedClient.email && <span className="badge">{selectedClient.email}</span>}
+                  {(selectedClient.whatsapp || selectedClient.phone) && <span className="badge">{selectedClient.whatsapp || selectedClient.phone}</span>}
+                </div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <strong className="font-kpi" style={{ color: selectedTrackData.color, fontSize: '1.8rem' }}>{clientProgress?.points ?? 0}</strong>
                 <div style={{ color: 'var(--brand-muted)', fontSize: '0.76rem' }}>de {maxPoints} pontos</div>
               </div>
             </header>
+
+            <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+              <a href={getMailto(selectedClient, selectedTrackData)} className="btn-accent" style={{ justifyContent: 'center', textDecoration: 'none' }}>
+                <Mail size={15} aria-hidden="true" />
+                Enviar email
+              </a>
+              <a
+                href={getWhatsAppLink(selectedClient, selectedTrackData)}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-ghost"
+                style={{ justifyContent: 'center', textDecoration: 'none', pointerEvents: selectedClient.whatsapp || selectedClient.phone ? 'auto' : 'none', opacity: selectedClient.whatsapp || selectedClient.phone ? 1 : 0.45 }}
+              >
+                <MessageCircle size={15} aria-hidden="true" />
+                WhatsApp
+              </a>
+              <a
+                href={selectedClient.phone ? `tel:${onlyDigits(selectedClient.phone)}` : '#'}
+                className="btn-ghost"
+                style={{ justifyContent: 'center', textDecoration: 'none', pointerEvents: selectedClient.phone ? 'auto' : 'none', opacity: selectedClient.phone ? 1 : 0.45 }}
+              >
+                <Phone size={15} aria-hidden="true" />
+                Ligar
+              </a>
+              <Link href="/dashboard/agenda" className="btn-ghost" style={{ justifyContent: 'center' }}>Agendar</Link>
+            </section>
 
             {selectedClient.filiais.length > 0 && (
               <div style={{ display: 'grid', gap: 6 }}>

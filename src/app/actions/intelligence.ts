@@ -162,7 +162,11 @@ export async function generateLeadIntelligence(leadId: string) {
     return { success: true, report: fullMarkdown, data: extractedData }
   } catch (error) {
     console.error('Erro ao gerar inteligência:', error)
-    return { success: false, error: 'Falha na análise da IA' }
+    const message = error instanceof Error ? error.message : 'Falha na análise da IA'
+    const friendly = /quota|billing/i.test(message)
+      ? 'Cota da OpenAI excedida. Verifique o plano e o faturamento em platform.openai.com.'
+      : message
+    return { success: false, error: friendly }
   }
 }
 

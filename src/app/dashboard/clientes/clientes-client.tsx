@@ -48,6 +48,7 @@ import {
   type ClientMeeting,
 } from '@/app/actions/reunioes'
 import { createCallLog, type CallOutcome } from '@/app/actions/ligacoes'
+import { formatCnpj } from '@/lib/formatters'
 
 export type ClientRow = {
   id: string
@@ -57,10 +58,16 @@ export type ClientRow = {
   contractId: string | null
   name: string
   company: string
+  contactName: string
+  razaoSocial: string
   email: string
   phone: string
   whatsapp: string
   document: string
+  segmento: string
+  cidade: string
+  estado: string
+  notas: string
   product: string
   consultant: string
   sourceLabel: string
@@ -129,6 +136,18 @@ function formatDate(value: string | null) {
   return parsed.toLocaleDateString('pt-BR')
 }
 
+const MAIN_HONORARIO_SERVICE_NAME = 'Honorário do Contrato Principal'
+
+function getHonorarioSummary(row: ClientRow): string | null {
+  if (row.contractValue && row.contractValue > 0) return formatCurrency(row.contractValue)
+  const activeService = row.services.find((service) => service.nome === MAIN_HONORARIO_SERVICE_NAME && service.status === 'ativo')
+    || row.services.find((service) => service.status === 'ativo')
+    || row.services[0]
+  if (activeService?.tipo_honorario === 'fixo' && activeService.honorario_valor) return formatCurrency(activeService.honorario_valor)
+  if (activeService?.tipo_honorario === 'percentual' && activeService.honorario_percentual) return `${activeService.honorario_percentual}%`
+  return null
+}
+
 function formatAge(value: string | null) {
   if (!value) return 'Sem data'
   const parsed = new Date(value)
@@ -161,15 +180,6 @@ type CnpjLookupData = {
   origem: string
 }
 
-function maskCnpj(value: string) {
-  const digits = value.replace(/\D/g, '').slice(0, 14)
-  return digits
-    .replace(/^(\d{2})(\d)/, '$1.$2')
-    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
-    .replace(/\.(\d{3})(\d)/, '.$1/$2')
-    .replace(/(\d{4})(\d)/, '$1-$2')
-}
-
 const CRM_STAGE_COLORS: Record<string, string> = {
   'Contato Inicial': '#9ca3af',
   Qualificacao: '#3b82f6',
@@ -180,8 +190,8 @@ const CRM_STAGE_COLORS: Record<string, string> = {
 
 const CRM_STAGE_LABELS: Record<string, string> = {
   'Contato Inicial': 'Contato Inicial',
-  Qualificacao: 'Qualificacao',
-  Apresentacao: 'Apresentacao',
+  Qualificacao: 'Qualificação',
+  Apresentacao: 'Apresentação',
   Proposta: 'Proposta',
   Fechado: 'Fechamento',
 }
@@ -234,6 +244,10 @@ export default function ClientesClient({
     phone: '',
     whatsapp: '',
     document: '',
+    segmento: '',
+    cidade: '',
+    estado: '',
+    notas: '',
     crmStage: 'Contato Inicial',
     consultantId: '',
     productId: '',
@@ -280,7 +294,7 @@ export default function ClientesClient({
     return localRows.filter((row) => {
       const matchesQuery =
         !q ||
-        [row.name, row.company, row.consultant, row.product, row.contractNumber || '', row.email, row.phone, row.whatsapp]
+        [row.name, row.company, row.contactName, row.razaoSocial, row.segmento, row.cidade, row.estado, row.document, row.consultant, row.product, row.contractNumber || '', row.email, row.phone, row.whatsapp]
           .join(' ')
           .toLowerCase()
           .includes(q)
@@ -315,13 +329,13 @@ export default function ClientesClient({
       await navigator.clipboard.writeText(contact)
       toast.success('Contato copiado.')
     } catch {
-      toast.error('Nao foi possivel copiar o contato.')
+      toast.error('Não foi possível copiar o contato.')
     }
   }
 
   async function handleCreateClient() {
     if (!createForm.name.trim()) {
-      toast.error('Informe o nome do cliente.')
+      toast.error('Informe o contato principal da empresa.')
       return
     }
 
@@ -333,6 +347,10 @@ export default function ClientesClient({
         phone: createForm.phone || null,
         whatsapp: createForm.whatsapp || null,
         documento: createForm.document || null,
+        segmento: createForm.segmento || null,
+        cidade: createForm.cidade || null,
+        estado: createForm.estado || null,
+        notas: createForm.notas || null,
         crm_stage: createForm.crmStage || null,
         consultor_responsavel_id: createForm.consultantId || null,
         produto_foco_id: createForm.productId || null,
@@ -356,6 +374,10 @@ export default function ClientesClient({
         phone: '',
         whatsapp: '',
         document: '',
+        segmento: '',
+        cidade: '',
+        estado: '',
+        notas: '',
         crmStage: 'Contato Inicial',
         consultantId: '',
         productId: '',
@@ -367,7 +389,7 @@ export default function ClientesClient({
   async function handleLookupCnpj() {
     const cnpj = createForm.document.replace(/\D/g, '')
     if (cnpj.length !== 14) {
-      toast.error('Informe um CNPJ com 14 digitos.')
+      toast.error('Informe um CNPJ com 14 dígitos.')
       return
     }
 
@@ -378,17 +400,19 @@ export default function ClientesClient({
       const data = await response.json()
 
       if (!response.ok) {
-        toast.error('CNPJ nao encontrado', { description: data.error || 'Confira o numero informado.' })
+        toast.error('CNPJ não encontrado', { description: data.error || 'Confira o número informado.' })
         return
       }
 
       const lookup = data as CnpjLookupData
-      const companyName = lookup.nomeFantasia || lookup.razaoSocial
       setCreateForm((current) => ({
         ...current,
-        document: maskCnpj(lookup.cnpj),
+        document: formatCnpj(lookup.cnpj),
         company: lookup.razaoSocial || current.company,
-        name: current.name || companyName || lookup.razaoSocial,
+        name: current.name,
+        segmento: current.segmento || lookup.atividadePrincipal || '',
+        cidade: current.cidade || lookup.municipio || '',
+        estado: current.estado || lookup.uf || '',
         email: current.email || lookup.email || '',
         phone: current.phone || lookup.telefone || '',
         whatsapp: current.whatsapp || lookup.telefone || '',
@@ -430,7 +454,7 @@ export default function ClientesClient({
       email: selectedRow.email || '',
       phone: selectedRow.phone || '',
       whatsapp: selectedRow.whatsapp || '',
-      document: selectedRow.document || '',
+      document: formatCnpj(selectedRow.document),
     })
     setSelectedPdfFile(null)
     setSelectedPdfPreview('')
@@ -540,8 +564,8 @@ export default function ClientesClient({
 
   function handleSaveMeeting() {
     if (!selectedRow?.clientRecordId) return
-    if (!meetingForm.title.trim()) { toast.error('Informe o titulo da reuniao.'); return }
-    if (!meetingForm.meeting_date) { toast.error('Informe a data da reuniao.'); return }
+    if (!meetingForm.title.trim()) { toast.error('Informe o título da reunião.'); return }
+    if (!meetingForm.meeting_date) { toast.error('Informe a data da reunião.'); return }
 
     startTransition(async () => {
       const result = await createClientMeeting(selectedRow.clientRecordId, {
@@ -555,7 +579,7 @@ export default function ClientesClient({
         ai_generated: meetingForm.pauta.length > 0 && pautaLoading === false,
       })
       if (!result.success) {
-        toast.error(result.error || 'Erro ao salvar reuniao.')
+        toast.error(result.error || 'Erro ao salvar reunião.')
         return
       }
       toast.success('Reuniao registrada.')
@@ -575,11 +599,11 @@ export default function ClientesClient({
   }
 
   function handleDeleteMeeting(meetingId: string) {
-    if (!confirm('Tem certeza que deseja excluir esta reuniao?')) return
+    if (!confirm('Tem certeza que deseja excluir esta reunião?')) return
     startTransition(async () => {
       const result = await deleteClientMeeting(meetingId)
       if (!result.success) {
-        toast.error(result.error || 'Erro ao excluir reuniao.')
+        toast.error(result.error || 'Erro ao excluir reunião.')
         return
       }
       toast.success('Reuniao excluida.')
@@ -650,7 +674,7 @@ export default function ClientesClient({
       })
 
       if (!result.success) {
-        toast.error(result.error || 'Nao foi possivel salvar o contrato.')
+        toast.error(result.error || 'Não foi possível salvar o contrato.')
         return
       }
 
@@ -684,7 +708,7 @@ export default function ClientesClient({
       const result = await uploadContractPdfFromForm(formData)
 
       if (!result.success) {
-        toast.error(result.error || 'Nao foi possivel enviar o PDF.')
+        toast.error(result.error || 'Não foi possível enviar o PDF.')
         return
       }
 
@@ -711,11 +735,11 @@ export default function ClientesClient({
         email: clientForm.email || null,
         phone: clientForm.phone || null,
         whatsapp: clientForm.whatsapp || null,
-        documento: clientForm.document || null,
+        documento: formatCnpj(clientForm.document) || undefined,
       })
 
       if (!result.success) {
-        toast.error(result.error || 'Nao foi possivel salvar o cliente.')
+        toast.error(result.error || 'Não foi possível salvar o cliente.')
         return
       }
 
@@ -738,7 +762,7 @@ export default function ClientesClient({
       })
 
       if (!result.success) {
-        toast.error(result.error || 'Nao foi possivel ativar o contrato.')
+        toast.error(result.error || 'Não foi possível ativar o contrato.')
         return
       }
 
@@ -757,7 +781,7 @@ export default function ClientesClient({
       const result = await cancelContract(contractId, contractForm.notes || undefined)
 
       if (!result.success) {
-        toast.error(result.error || 'Nao foi possivel cancelar o contrato.')
+        toast.error(result.error || 'Não foi possível cancelar o contrato.')
         return
       }
 
@@ -779,7 +803,7 @@ export default function ClientesClient({
       })
 
       if (!result.success) {
-        toast.error(result.error || 'Nao foi possivel gerar a renovacao.')
+        toast.error(result.error || 'Não foi possível gerar a renovação.')
         return
       }
 
@@ -965,7 +989,7 @@ export default function ClientesClient({
                                 }}
                               >
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                  <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.85rem' }}>{row.name}</div>
+                                  <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: '0.85rem' }}>{row.razaoSocial || row.name}</div>
                                   <span
                                     style={{
                                       padding: '3px 6px', borderRadius: '4px',
@@ -976,7 +1000,9 @@ export default function ClientesClient({
                                     {row.clientStatusLabel}
                                   </span>
                                 </div>
-                                <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>{row.company || 'Sem empresa'}</div>
+                                <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
+                                  {row.contactName ? `Contato: ${row.contactName}` : 'Contato não informado'}
+                                </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
                                   <div>
                                     <div style={{ color: '#64748b', fontSize: '0.65rem', textTransform: 'uppercase' }}>Consultor</div>
@@ -987,14 +1013,16 @@ export default function ClientesClient({
                                     <div style={{ color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 600 }}>{row.product}</div>
                                   </div>
                                 </div>
-                                <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px', color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 700 }}>
-                                  <Clock3 size={12} color="#94a3b8" />
-                                  {formatCurrency(row.contractValue)}
-                                </div>
+                                {getHonorarioSummary(row) && (
+                                  <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px', color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 700 }}>
+                                    <Clock3 size={12} color="#94a3b8" />
+                                    {getHonorarioSummary(row)}
+                                  </div>
+                                )}
                                 {row.clientStatusLabel === 'A vencer' && (
                                   <div style={{ marginTop: '6px', padding: '8px', borderRadius: '8px', background: 'rgba(250,204,21,0.08)', border: '1px solid rgba(250,204,21,0.2)', display: 'grid', gap: '4px' }}>
                                     <div style={{ color: '#facc15', fontSize: '0.68rem', fontWeight: 800 }}>
-                                      {row.daysToExpire !== null ? `Vence em ${row.daysToExpire} dia${row.daysToExpire === 1 ? '' : 's'}` : 'Vencimento nao definido'}
+                                      {row.daysToExpire !== null ? `Vence em ${row.daysToExpire} dia${row.daysToExpire === 1 ? '' : 's'}` : 'Vencimento não definido'}
                                     </div>
                                     {row.services.length > 0 ? (
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
@@ -1216,8 +1244,9 @@ export default function ClientesClient({
                     <input
                       className="input-field"
                       value={clientForm.document}
-                      onChange={(event) => setClientField('document', event.target.value)}
-                      placeholder="Documento"
+                      onChange={(event) => setClientField('document', formatCnpj(event.target.value))}
+                      placeholder="00.000.000/0001-00"
+                      inputMode="numeric"
                     />
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
@@ -1244,15 +1273,15 @@ export default function ClientesClient({
                 <div style={{ display: 'grid', gap: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
                     <span style={{ color: '#cbd5e1' }}>E-mail</span>
-                    <span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.email || 'Nao cadastrado'}</span>
+                    <span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.email || 'Não cadastrado'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
                     <span style={{ color: '#cbd5e1' }}>Telefone</span>
-                    <span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.phone || 'Nao cadastrado'}</span>
+                    <span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.phone || 'Não cadastrado'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
                     <span style={{ color: '#cbd5e1' }}>WhatsApp</span>
-                    <span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.whatsapp || 'Nao cadastrado'}</span>
+                    <span style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedRow.whatsapp || 'Não cadastrado'}</span>
                   </div>
 
                   {/* Botões de ação rápida */}
@@ -1669,7 +1698,7 @@ export default function ClientesClient({
                     onClick={() => setMeetingFormOpen((open) => !open)}
                   >
                     <Plus size={13} />
-                    Nova reuniao
+                    Nova reunião
                   </button>
                 </div>
 
@@ -1685,7 +1714,7 @@ export default function ClientesClient({
                       />
                       <input
                         className="input-field"
-                        placeholder="Titulo da reuniao"
+                        placeholder="Título da reunião"
                         value={meetingForm.title}
                         onChange={(e) => setMeetingForm((f) => ({ ...f, title: e.target.value }))}
                       />
@@ -1749,7 +1778,7 @@ export default function ClientesClient({
                       </div>
                       <textarea
                         className="input-field"
-                        placeholder="Pauta da reuniao (ou clique em &apos;Gerar com IA&apos;)"
+                        placeholder="Pauta da reunião (ou clique em &apos;Gerar com IA&apos;)"
                         value={meetingForm.pauta}
                         rows={5}
                         onChange={(e) => setMeetingForm((f) => ({ ...f, pauta: e.target.value }))}
@@ -1770,7 +1799,7 @@ export default function ClientesClient({
                       </button>
                       <button type="button" className="btn-primary" style={{ fontSize: '0.78rem' }} onClick={handleSaveMeeting} disabled={isPending}>
                         <CheckCircle2 size={14} />
-                        Salvar reuniao
+                        Salvar reunião
                       </button>
                     </div>
                   </div>
@@ -1779,7 +1808,7 @@ export default function ClientesClient({
                 {/* Lista de reuniões */}
                 {meetings.length === 0 && !meetingsLoading && !meetingFormOpen && (
                   <div style={{ padding: '12px', borderRadius: '12px', border: '1px dashed rgba(148,163,184,0.18)', color: '#94a3b8', fontSize: '0.78rem' }}>
-                    Nenhuma reuniao registrada para este cliente ainda.
+                    Nenhuma reunião registrada para este cliente ainda.
                   </div>
                 )}
 
@@ -1833,7 +1862,7 @@ export default function ClientesClient({
                           )}
                           <button
                             type="button"
-                            title="Excluir reuniao"
+                            title="Excluir reunião"
                             onClick={(e) => { e.stopPropagation(); handleDeleteMeeting(meeting.id) }}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', padding: '2px' }}
                           >
@@ -1957,7 +1986,7 @@ export default function ClientesClient({
                 <input
                   className="input-field"
                   value={createForm.document}
-                  onChange={(event) => setCreateForm((current) => ({ ...current, document: maskCnpj(event.target.value) }))}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, document: formatCnpj(event.target.value) }))}
                   inputMode="numeric"
                 />
               </label>
@@ -1974,7 +2003,7 @@ export default function ClientesClient({
                   {cnpjLookupData.atividadePrincipal ? <small>{cnpjLookupData.atividadePrincipal}</small> : null}
                 </div>
                 <div className="cnpj-result-meta">
-                  <span>{cnpjLookupData.situacao || 'Situacao nao informada'}</span>
+                  <span>{cnpjLookupData.situacao || 'Situação não informada'}</span>
                   {cnpjLookupData.municipio && cnpjLookupData.uf ? <span>{cnpjLookupData.municipio}/{cnpjLookupData.uf}</span> : null}
                   <span>Fonte: {cnpjLookupData.origem}</span>
                 </div>
@@ -1985,12 +2014,32 @@ export default function ClientesClient({
           <section className="clean-form-section">
             <div className="clean-form-row clean-form-stage-row">
               <label>
-                Nome no CRM
+                Contato principal
                 <input className="input-field" value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} />
               </label>
               <label>
-                Razao social
+                Razão social
                 <input className="input-field" value={createForm.company} onChange={(event) => setCreateForm((current) => ({ ...current, company: event.target.value }))} />
+              </label>
+            </div>
+            <div className="clean-form-row">
+              <label>
+                Segmento
+                <input className="input-field" value={createForm.segmento} onChange={(event) => setCreateForm((current) => ({ ...current, segmento: event.target.value }))} />
+              </label>
+              <label>
+                Cidade
+                <input className="input-field" value={createForm.cidade} onChange={(event) => setCreateForm((current) => ({ ...current, cidade: event.target.value }))} />
+              </label>
+              <label>
+                Estado
+                <input className="input-field" value={createForm.estado} onChange={(event) => setCreateForm((current) => ({ ...current, estado: event.target.value.toUpperCase().slice(0, 2) }))} />
+              </label>
+            </div>
+            <div className="clean-form-row">
+              <label style={{ gridColumn: '1 / -1' }}>
+                Observações cadastrais
+                <textarea className="input-field" value={createForm.notas} onChange={(event) => setCreateForm((current) => ({ ...current, notas: event.target.value }))} rows={3} />
               </label>
             </div>
             <div className="clean-form-row">

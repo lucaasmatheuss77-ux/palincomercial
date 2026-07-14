@@ -1,15 +1,26 @@
 import { createClient } from '@/lib/supabase/server'
 import { listClienteOptions } from '@/app/actions/clientes'
 import MobileHubClient from '../dashboard/mobile-crm/mobile-client'
-import { redirect } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 
-export default async function PocketCRMPage() {
+type MobileSearchParams = {
+  tab?: string | string[]
+  leadId?: string | string[]
+}
+
+function getParam(value?: string | string[]) {
+  return Array.isArray(value) ? value[0] || '' : value || ''
+}
+
+export default async function PocketCRMPage({ searchParams }: { searchParams?: MobileSearchParams | Promise<MobileSearchParams> } = {}) {
+  const params = await searchParams
+  const initialTab = getParam(params?.tab)
+  const initialLeadId = getParam(params?.leadId)
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
-  const currentUser = user || { id: 'demo-123', email: 'demo@palin.com', user_metadata: { full_name: 'Gestor' } }
+  const currentUser = user || { id: '', email: 'mobile@palin.local', user_metadata: { full_name: 'Mobile' } }
 
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
@@ -18,14 +29,14 @@ export default async function PocketCRMPage() {
   const [leadsRes, agendaRes, meetingsTodayRes, overdueRes, profileRes] = await Promise.allSettled([
     supabase
       .from('leads')
-      .select('id, name, stage, whatsapp, expected_value, created_at, ai_score, cnpj, segmento_especifico, company')
+      .select('id, name, stage, whatsapp, expected_value, created_at, segmento_especifico, company:company_name')
       .order('updated_at', { ascending: false })
       .limit(10000),
 
     supabase
       .from('meetings')
-      .select('id, title, scheduled_for, client_name')
-      .eq('consultant_id', currentUser.id)
+      .select('id, title, scheduled_for, client_name:lead_name, location')
+      .eq('owner_profile_id', currentUser.id)
       .gte('scheduled_for', new Date().toISOString())
       .order('scheduled_for', { ascending: true })
       .limit(5),
@@ -33,7 +44,7 @@ export default async function PocketCRMPage() {
     supabase
       .from('meetings')
       .select('id')
-      .eq('consultant_id', currentUser.id)
+      .eq('owner_profile_id', currentUser.id)
       .gte('scheduled_for', todayStart)
       .lte('scheduled_for', todayEnd),
 
@@ -88,6 +99,8 @@ export default async function PocketCRMPage() {
         leads={leads}
         clientes={clientes}
         agenda={agenda}
+        initialTab={initialTab}
+        initialLeadId={initialLeadId}
         stats={stats}
       />
     </main>

@@ -22,6 +22,7 @@ type ClientRecord = {
   origin_lead_id: string | null
   status_cliente: string | null
   active_contract_id: string | null
+  documento: string | null
 }
 
 type LeadTimeline = {
@@ -89,13 +90,13 @@ export default async function PipelinePage({
 
   const supabase = await createClient()
 
-  const [{ data: leadsData }, { data: productsData }, { data: profilesData }, aiResult, historyResult, contractsResult, clientsResult] = await Promise.all([
+  const [leadsResult, { data: productsData }, { data: profilesData }, aiResult, historyResult, contractsResult, clientsResult] = await Promise.all([
     supabase
       .from('leads')
       .select(`
         id, name, company_name, stage, expected_value, created_at, notas,
-        phone, whatsapp, email,
-        product_id, consultant_id,
+        phone, whatsapp, email, cnpj, regime_tributario, faturamento_estimado, segmento_especifico,
+        product_id, consultant_id, client_id,
         product:products(id, name),
         consultant:profiles!consultant_id(id, full_name)
       `)
@@ -106,8 +107,25 @@ export default async function PipelinePage({
     supabase.from('ai_qualifications').select('lead_id, status, score, source, summary, updated_at'),
     supabase.from('lead_intelligence_history').select('lead_id, report_json, created_at').order('created_at', { ascending: false }),
     supabase.from('contracts').select('id, lead_id, client_id, contract_number, status, value, signed_at, notes, start_date, end_date, pdf_file_name, created_at, updated_at'),
-    supabase.from('clientes').select('id, origin_lead_id, status_cliente, active_contract_id'),
+    supabase.from('clientes').select('id, origin_lead_id, status_cliente, active_contract_id, documento'),
   ])
+
+  let leadsData = leadsResult.data as unknown[] | null
+  if (leadsResult.error) {
+    console.warn('Consulta completa de leads indisponível, usando fallback:', leadsResult.error.message)
+    const fallback = await supabase
+      .from('leads')
+      .select(`
+        id, name, company_name, stage, expected_value, created_at, notas,
+        phone, whatsapp, email,
+        product_id, consultant_id,
+        product:products(id, name),
+        consultant:profiles!consultant_id(id, full_name)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(10000)
+    leadsData = fallback.data as unknown[] | null
+  }
 
   const aiRecords = ((aiResult.error ? [] : aiResult.data) || []) as Array<{
     lead_id: string
@@ -356,9 +374,14 @@ export default async function PipelinePage({
     phone: string | null
     whatsapp: string | null
     email: string | null
+    cnpj: string | null
+    regime_tributario: string | null
+    faturamento_estimado: number | string | null
+    segmento_especifico: string | null
     notas: string | null
     product_id: string | null
     consultant_id: string | null
+    client_id?: string | null
     stage: string
     product?: Array<{ name: string | null }>
     consultant?: Array<{ full_name: string | null }>
@@ -383,12 +406,12 @@ export default async function PipelinePage({
     full_name: string
   }
 
-  const mappedLeads: LeadWithAiMeta[] = (leadsData || []).map((lead: SupabaseLeadRow) => {
+  const mappedLeads: LeadWithAiMeta[] = ((leadsData || []) as SupabaseLeadRow[]).map((lead: SupabaseLeadRow) => {
     const ai = aiByLead.get(lead.id) as AiQualificationRow | undefined
     const aiUpdatedAt = ai?.updated_at || null
     const aiFreshnessMinutes = aiUpdatedAt ? Math.max(0, Math.floor((Date.now() - new Date(aiUpdatedAt).getTime()) / (1000 * 60))) : null
-    const client = clientByLead.get(lead.id) || null
-    const clientId = client?.id || null
+    const client = clientByLead.get(lead.id) || (lead.client_id ? clientById.get(lead.client_id) : null) || null
+    const clientId = lead.client_id || client?.id || null
     const contract = contractByLead.get(lead.id) || (clientId ? contractByClient.get(clientId) : undefined)
     const contractInfo = classifyClientStatus(contract, client?.status_cliente)
 
@@ -406,6 +429,10 @@ export default async function PipelinePage({
       phone: lead.phone || '',
       whatsapp: lead.whatsapp || '',
       email: lead.email || '',
+      cnpj: lead.cnpj || client?.documento || '',
+      regime_tributario: lead.regime_tributario || '',
+      faturamento_estimado: lead.faturamento_estimado ? Number(lead.faturamento_estimado) : null,
+      segmento_especifico: lead.segmento_especifico || '',
       notes: lead.notas || null,
       ai_status: ai?.status || '',
       ai_score: Number(ai?.score || 0),
@@ -458,5 +485,3 @@ export default async function PipelinePage({
     />
   )
 }
-
-

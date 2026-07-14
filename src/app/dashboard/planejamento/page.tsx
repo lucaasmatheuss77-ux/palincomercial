@@ -1,5 +1,6 @@
 import { getMyProfile } from '@/app/actions/profile'
 import { createClient } from '@/lib/supabase/server'
+import { listStrategicPlanItems } from '@/app/actions/planejamento'
 import PlanejamentoClient from './planejamento-client'
 
 type PlanningPermission = {
@@ -45,7 +46,7 @@ export default async function PlanejamentoPage() {
   const yearStart = `${currentYear}-01-01`
   const yearEnd = `${currentYear}-12-31`
 
-  const [contractsRes, productsRes, activeClientsRes, avencerRes, honorariosRes, icmsRes] = await Promise.all([
+  const [contractsRes, productsRes, activeClientsRes, avencerRes, honorariosRes, icmsRes, ownersRes, planItems] = await Promise.all([
     supabase
       .from('contracts')
       .select('id, status, value, product_id, start_date, end_date, created_at')
@@ -56,7 +57,11 @@ export default async function PlanejamentoPage() {
     supabase.from('contracts').select('id', { count: 'exact', head: true }).eq('status', 'ativo').not('end_date', 'is', null).lte('end_date', new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString()),
     supabase.from('client_services').select('tipo_honorario, honorario_valor').eq('status', 'ativo'),
     supabase.from('icms_operations').select('valor_icms').gte('data_venda', yearStart).lte('data_venda', yearEnd),
+    supabase.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
+    listStrategicPlanItems(),
   ])
+
+  const owners = ((ownersRes.data || []) as { id: string; full_name: string | null }[]).map((p) => ({ id: p.id, name: p.full_name || 'Sem nome' }))
 
   const contracts = (contractsRes.data || []) as ContractRow[]
   const products = (productsRes.data || []) as ProductRow[]
@@ -102,5 +107,5 @@ export default async function PlanejamentoPage() {
     monthlyCounts,
   }
 
-  return <PlanejamentoClient canEdit={canEditByRole || canEditByPermission} stats={stats} />
+  return <PlanejamentoClient canEdit={canEditByRole || canEditByPermission} stats={stats} items={planItems} owners={owners} />
 }

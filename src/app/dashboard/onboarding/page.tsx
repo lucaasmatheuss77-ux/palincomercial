@@ -8,6 +8,10 @@ type ClienteRow = {
   id: string
   name: string
   company_name: string | null
+  documento: string | null
+  email: string | null
+  phone: string | null
+  whatsapp: string | null
   status_cliente: string | null
   product_id: string | null
   created_at: string | null
@@ -36,7 +40,7 @@ export default async function OnboardingPage() {
 
   const { data: clientesData, error: clientesError } = await supabase
     .from('clientes')
-    .select('id, name, company_name, status_cliente, product_id, created_at')
+    .select('id, name, company_name, documento, email, phone, whatsapp, status_cliente, product_id, created_at')
     .in('status_cliente', ['aguardando_contrato', 'ativo'])
     .order('created_at', { ascending: false })
 
@@ -84,6 +88,10 @@ export default async function OnboardingPage() {
         id: cliente.id,
         name: cliente.name,
         company_name: cliente.company_name,
+        documento: cliente.documento,
+        email: cliente.email,
+        phone: cliente.phone,
+        whatsapp: cliente.whatsapp,
         product,
         contract_date: contract?.start_date || contract?.created_at || cliente.created_at || '',
         filiais: filiaisByClient.get(cliente.id) || [],

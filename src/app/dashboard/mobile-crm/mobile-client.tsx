@@ -10,6 +10,7 @@ import {
   Target, Plus, MapPin, Navigation,
 } from 'lucide-react'
 import { createLead, updateLeadStage } from '@/app/actions/pipeline'
+import { createMeeting } from '@/app/actions/agenda'
 import { recordCommercialActivity } from '@/app/actions/commercial-activities'
 import { ClientSearchField, type ClienteOption } from '@/components/client-search-field'
 import { triggerSaleConfetti } from '@/lib/effects'
@@ -133,6 +134,7 @@ type Lead = {
   name: string
   stage?: string | null
   whatsapp?: string | null
+  email?: string | null
   expected_value?: number | string | null
   ai_score?: number | null
   cnpj?: string | null
@@ -140,8 +142,30 @@ type Lead = {
   company?: string | null
 }
 
+type CnpjLookupData = {
+  cnpj: string
+  razaoSocial: string
+  nomeFantasia: string | null
+  situacao: string | null
+  atividadePrincipal: string | null
+  telefone: string | null
+  email: string | null
+  municipio: string | null
+  uf: string | null
+  origem: string
+}
+
+type MobileAgendaItem = {
+  id: string
+  title?: string | null
+  scheduled_for?: string | null
+  client_name?: string | null
+  location?: string | null
+}
+
 interface MobileHubProps {
   user: {
+    id?: string | null
     email?: string | null
     role?: string
     user_metadata?: { full_name?: string | null }
@@ -149,7 +173,9 @@ interface MobileHubProps {
   } | null
   leads: Lead[]
   clientes: ClienteOption[]
-  agenda: { id: string; title?: string | null; scheduled_for?: string | null; client_name?: string | null }[]
+  agenda: MobileAgendaItem[]
+  initialTab?: string
+  initialLeadId?: string
   stats: {
     closedLeads: number
     activeLeads: number
@@ -158,6 +184,15 @@ interface MobileHubProps {
     reunioesHoje: number
     atividadesAtrasadas: number
   }
+}
+
+function formatCnpj(value: string | null | undefined) {
+  const digits = (value || '').replace(/\D/g, '').slice(0, 14)
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2')
 }
 
 const STAGE_COLORS: Record<string, string> = {
@@ -191,12 +226,8 @@ function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => 
         />
       )}
 
-      {/* Itens em arco */}
+      {/* Itens abrindo para cima */}
       {open && ALL_TABS.map((item, i) => {
-        const angleDeg = A_START + (A_END - A_START) * (i / (N - 1))
-        const rad = angleDeg * Math.PI / 180
-        const dx = Math.cos(rad) * RADIUS     // + direita
-        const dy = Math.sin(rad) * RADIUS     // + cima (usando bottom)
         const isAct = active === item.id
         const Icon = item.icon
 
@@ -208,20 +239,22 @@ function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => 
             title={item.label}
             style={{
               position: 'fixed',
-              left: `calc(50% - 27px + ${dx}px)`,
-              bottom: 120 + 27 + dy,
-              width: 54,
-              height: 54,
-              borderRadius: '50%',
+              left: '50%',
+              bottom: 190 + i * 58,
+              transform: 'translateX(-50%)',
+              width: 230,
+              minHeight: 48,
+              borderRadius: 14,
               background: isAct
                 ? `linear-gradient(135deg, ${item.color}88, ${item.color})`
                 : 'rgba(13,17,23,0.97)',
-              border: `2px solid ${isAct ? item.color : item.color + '55'}`,
+              border: `1px solid ${isAct ? item.color : item.color + '55'}`,
               display: 'flex',
-              flexDirection: 'column',
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-              gap: 3,
+              justifyContent: 'flex-start',
+              gap: 10,
+              padding: '0 14px',
               cursor: 'pointer',
               boxShadow: isAct
                 ? `0 0 20px ${item.color}80, 0 4px 16px rgba(0,0,0,0.8)`
@@ -233,7 +266,7 @@ function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => 
           >
             <Icon size={17} color={isAct ? '#0a0600' : item.color} strokeWidth={2.3} style={{ pointerEvents: 'none' }} />
             <span style={{
-              fontSize: '0.42rem',
+              fontSize: '0.78rem',
               fontWeight: 900,
               color: isAct ? '#0a0600' : item.color,
               textTransform: 'uppercase',
@@ -307,6 +340,85 @@ function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => 
 }
 
 // ── StatCard ──────────────────────────────────────────────────────────────────
+function MobileTabBar({ active, onChange }: { active: TabId; onChange: (tab: TabId) => void }) {
+  return (
+    <nav
+      aria-label="Menu mobile"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+        gap: 8,
+        padding: '0 16px',
+        marginBottom: 18,
+      }}
+    >
+      {ALL_TABS.map((item) => {
+        const Icon = item.icon
+        const selected = active === item.id
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onChange(item.id)}
+            style={{
+              minHeight: 58,
+              borderRadius: 12,
+              border: `1px solid ${selected ? item.color : 'rgba(255,255,255,0.08)'}`,
+              background: selected ? `${item.color}18` : 'rgba(22,27,34,0.72)',
+              color: selected ? item.color : '#94a3b8',
+              display: 'grid',
+              placeItems: 'center',
+              gap: 4,
+              padding: '8px 4px',
+              fontSize: '0.62rem',
+              fontWeight: 850,
+              cursor: 'pointer',
+              boxShadow: selected ? `0 0 18px ${item.color}22` : 'none',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <Icon size={17} aria-hidden="true" />
+            <span style={{ lineHeight: 1.05 }}>{item.label}</span>
+          </button>
+        )
+      })}
+    </nav>
+  )
+}
+
+function NativeFABMenu({ active }: { active: TabId }) {
+  const activeTab = ALL_TABS.find(t => t.id === active)
+  return (
+    <details style={{ position: 'fixed', left: '50%', bottom: 112, transform: 'translateX(-50%)', zIndex: 10000, width: 62, height: 62 }}>
+      <summary style={{ width: 62, height: 62, borderRadius: '50%', background: 'linear-gradient(135deg, #92620a 0%, #d4970c 35%, #fbbf24 60%, #f0a500 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 0 40px rgba(251,191,36,0.55), 0 8px 32px rgba(0,0,0,0.7)', listStyle: 'none', WebkitTapHighlightColor: 'transparent' }}>
+        <Plus size={29} color="#0a0600" strokeWidth={2.5} />
+      </summary>
+      {activeTab && (
+        <div style={{ position: 'fixed', bottom: 74, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.68)', padding: '4px 12px', borderRadius: 12, fontSize: '0.7rem', fontWeight: 700, color: activeTab.color, textTransform: 'uppercase', pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+          {activeTab.label}
+        </div>
+      )}
+      <div style={{ position: 'absolute', left: 31, bottom: 76, width: 1, height: 1, pointerEvents: 'none' }}>
+        {ALL_TABS.map((item, i) => {
+          const Icon = item.icon
+          const selected = active === item.id
+          const total = ALL_TABS.length
+          const angle = (18 + (144 * i) / Math.max(1, total - 1)) * Math.PI / 180
+          const radius = 118
+          const x = Math.cos(angle) * radius
+          const y = Math.sin(angle) * radius
+          return (
+            <a key={item.id} href={`?tab=${item.id}`} style={{ position: 'absolute', left: x - 28, bottom: y - 28, width: 56, height: 56, borderRadius: '50%', background: selected ? `linear-gradient(135deg, ${item.color}88, ${item.color})` : 'rgba(13,17,23,0.98)', border: `1.5px solid ${selected ? item.color : item.color + '66'}`, display: 'grid', placeItems: 'center', gap: 1, padding: '7px 4px', boxSizing: 'border-box', textDecoration: 'none', boxShadow: selected ? `0 0 20px ${item.color}70` : `0 0 12px ${item.color}25`, WebkitTapHighlightColor: 'transparent', pointerEvents: 'auto' }}>
+              <Icon size={17} color={selected ? '#0a0600' : item.color} strokeWidth={2.4} />
+              <span style={{ fontSize: '0.43rem', fontWeight: 900, color: selected ? '#0a0600' : item.color, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1, textAlign: 'center', maxWidth: 48, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+            </a>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
+
 function StatCard({ label, value, sub, color = '#fbbf24', alert = false }: { label: string; value: string | number; sub: string; color?: string; alert?: boolean }) {
   return (
     <div style={{
@@ -327,15 +439,15 @@ function StatCard({ label, value, sub, color = '#fbbf24', alert = false }: { lab
 }
 
 // ── Lead Row ──────────────────────────────────────────────────────────────────
-function LeadRow({ lead, onTap }: { lead: Lead; onTap: () => void }) {
+function LeadRow({ lead }: { lead: Lead }) {
   const sc = STAGE_COLORS[lead.stage || ''] || '#64748b'
   const isUrgent = ['Proposta', 'Negociacao', 'Negociação'].includes(lead.stage || '')
   return (
-    <button className={isUrgent ? 'pulse-red-border' : ''} onClick={onTap} style={{
+    <a className={isUrgent ? 'pulse-red-border' : ''} href={`?tab=agenda&leadId=${encodeURIComponent(lead.id)}`} style={{
       width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px',
       background: isUrgent ? 'linear-gradient(135deg, rgba(69,10,10,0.6) 0%, rgba(16,20,28,0.9) 100%)' : 'linear-gradient(135deg, rgba(22,27,34,0.95) 0%, rgba(16,20,28,0.9) 100%)',
       border: isUrgent ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.07)',
-      borderRadius: 14, cursor: 'pointer', textAlign: 'left',
+      borderRadius: 14, cursor: 'pointer', textAlign: 'left', textDecoration: 'none',
       boxShadow: isUrgent ? '0 2px 12px rgba(239,68,68,0.3), inset 0 1px 0 rgba(239,68,68,0.1)' : '0 2px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03)',
       transition: 'border-color 0.2s, box-shadow 0.2s',
       WebkitTapHighlightColor: 'transparent',
@@ -359,12 +471,12 @@ function LeadRow({ lead, onTap }: { lead: Lead; onTap: () => void }) {
         </div>
       </div>
       <ChevronRight size={14} color="#334155" />
-    </button>
+    </a>
   )
 }
 
 // ── Lead Detail Modal ─────────────────────────────────────────────────────────
-function LeadDetail({ lead, onClose, onUpdate }: { lead: Lead; onClose: () => void; onUpdate: () => void }) {
+function LeadDetail({ lead, onClose, onUpdate, onSchedule }: { lead: Lead; onClose: () => void; onUpdate: () => void; onSchedule: (lead: Lead) => void }) {
   const [stage, setStage]   = useState(lead.stage || 'Contato Inicial')
   const [note, setNote]     = useState('')
   const [loading, setLoading] = useState(false)
@@ -423,6 +535,15 @@ function LeadDetail({ lead, onClose, onUpdate }: { lead: Lead; onClose: () => vo
           </a>
         )}
 
+        <button
+          type="button"
+          onClick={() => onSchedule(lead)}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px', borderRadius: 12, background: 'rgba(125,211,252,0.1)', border: '1px solid rgba(125,211,252,0.25)', color: '#7dd3fc', fontSize: '0.82rem', fontWeight: 800, cursor: 'pointer' }}
+        >
+          <CalendarDays size={16} />
+          Agendar reunião
+        </button>
+
         <div>
           <p style={{ fontSize: '0.58rem', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 8 }}>Nota rápida</p>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -440,7 +561,7 @@ function LeadDetail({ lead, onClose, onUpdate }: { lead: Lead; onClose: () => vo
 }
 
 // ── Pipeline View ─────────────────────────────────────────────────────────────
-function PipelineView({ leads, stats, onLeadsChange }: { leads: Lead[]; stats: MobileHubProps['stats']; onLeadsChange: (l: Lead[]) => void }) {
+function PipelineView({ leads, stats, onLeadsChange, onScheduleLead }: { leads: Lead[]; stats: MobileHubProps['stats']; onLeadsChange: (l: Lead[]) => void; onScheduleLead: (lead: Lead) => void }) {
   const [search, setSearch]     = useState('')
   const [selectedLead, setSelected] = useState<Lead | null>(null)
   const active   = leads.filter(l => l.stage !== 'Fechado' && l.stage !== 'Perdido')
@@ -466,10 +587,10 @@ function PipelineView({ leads, stats, onLeadsChange }: { leads: Lead[]; stats: M
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {filtered.length === 0
           ? <div style={{ padding: 24, textAlign: 'center', color: '#1e293b', fontSize: '0.82rem', background: 'rgba(22,27,34,0.6)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.04)' }}>{search ? `Nenhum resultado para "${search}"` : 'Nenhum lead ativo.'}</div>
-          : filtered.slice(0, 12).map(lead => <LeadRow key={lead.id} lead={lead} onTap={() => setSelected(lead)} />)
+          : filtered.slice(0, 12).map(lead => <LeadRow key={lead.id} lead={lead} />)
         }
       </div>
-      {selectedLead && <LeadDetail lead={selectedLead} onClose={() => setSelected(null)} onUpdate={() => onLeadsChange(leads)} />}
+      {selectedLead && <LeadDetail lead={selectedLead} onClose={() => setSelected(null)} onUpdate={() => onLeadsChange(leads)} onSchedule={(lead) => { setSelected(null); onScheduleLead(lead) }} />}
     </div>
   )
 }
@@ -477,7 +598,7 @@ function PipelineView({ leads, stats, onLeadsChange }: { leads: Lead[]; stats: M
 // ── Radar View com GPS ────────────────────────────────────────────────────────
 interface GeoLead extends Lead { distance?: number; matched?: boolean }
 
-function RadarView({ leads }: { leads: Lead[] }) {
+function RadarView({ leads, onScheduleLead }: { leads: Lead[]; onScheduleLead: (lead: Lead) => void }) {
   const [myCity, setMyCity]       = useState('')
   const [gpsLoading, setGpsLoading] = useState(false)
   const [gpsError, setGpsError]   = useState('')
@@ -719,12 +840,147 @@ function RadarView({ leads }: { leads: Lead[] }) {
         </div>
       </div>
 
-      {selectedLead && <LeadDetail lead={selectedLead} onClose={() => setSelected(null)} onUpdate={() => {}} />}
+      {selectedLead && <LeadDetail lead={selectedLead} onClose={() => setSelected(null)} onUpdate={() => {}} onSchedule={(lead) => { setSelected(null); onScheduleLead(lead) }} />}
     </div>
   )
 }
 
 // ── Ações View ────────────────────────────────────────────────────────────────
+function NewLeadInlineFull({ clientes, onDone }: { clientes: ClienteOption[]; onDone: (lead: Lead) => void }) {
+  const [nome, setNome] = useState('')
+  const [empresa, setEmpresa] = useState('')
+  const [cnpj, setCnpj] = useState('')
+  const [email, setEmail] = useState('')
+  const [whats, setWhats] = useState('')
+  const [valor, setValor] = useState('')
+  const [cidade, setCidade] = useState('')
+  const [atividade, setAtividade] = useState('')
+  const [lookupData, setLookupData] = useState<CnpjLookupData | null>(null)
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const [isPending, start] = useTransition()
+
+  async function lookupCnpj() {
+    const digits = cnpj.replace(/\D/g, '')
+    if (digits.length !== 14) {
+      toast.error('Informe um CNPJ com 14 digitos.')
+      return
+    }
+
+    setLookupLoading(true)
+    setLookupData(null)
+    try {
+      const response = await fetch(`/api/cnpj/${digits}`)
+      const data = await response.json()
+      if (!response.ok) {
+        toast.error('CNPJ nao encontrado', { description: data.error || 'Confira o numero informado.' })
+        return
+      }
+
+      const lookup = data as CnpjLookupData
+      setCnpj(formatCnpj(lookup.cnpj))
+      setEmpresa(lookup.razaoSocial || empresa)
+      setNome(nome || lookup.nomeFantasia || lookup.razaoSocial || '')
+      setAtividade(lookup.atividadePrincipal || atividade)
+      setCidade([lookup.municipio, lookup.uf].filter(Boolean).join('/') || cidade)
+      setEmail(email || lookup.email || '')
+      setWhats(whats || lookup.telefone || '')
+      setLookupData(lookup)
+      toast.success('Dados do CNPJ carregados.')
+    } catch {
+      toast.error('Falha ao consultar CNPJ.')
+    } finally {
+      setLookupLoading(false)
+    }
+  }
+
+  function submit() {
+    if (!nome.trim() && !empresa.trim()) {
+      toast.error('Informe o nome ou razao social.')
+      return
+    }
+
+    start(async () => {
+      const displayName = nome.trim() || empresa.trim()
+      const formattedCnpj = formatCnpj(cnpj)
+      const r = await createLead({
+        name: displayName,
+        company: empresa.trim() || displayName,
+        product_id: '',
+        consultant_id: '',
+        expected_value: Number(valor.replace(/\D/g, '')) || 0,
+        stage: 'Contato Inicial',
+        cnpj: formattedCnpj || undefined,
+        email: email.trim() || undefined,
+        whatsapp: whats.trim() || undefined,
+        segmento_especifico: atividade.trim() || cidade.trim() || undefined,
+      })
+
+      if (r.success && r.lead) {
+        toast.success('Lead criado!', { description: `${displayName}${cidade ? ` - ${cidade}` : ''}` })
+        onDone({ id: r.lead.id, name: displayName, company: empresa || displayName, stage: 'Contato Inicial', cnpj: formattedCnpj || null, email: email || null, whatsapp: whats || null, expected_value: valor || null, ai_score: null, segmento_especifico: atividade || cidade || null })
+        setNome('')
+        setEmpresa('')
+        setCnpj('')
+        setEmail('')
+        setWhats('')
+        setValor('')
+        setCidade('')
+        setAtividade('')
+        setLookupData(null)
+      } else {
+        toast.error(r.error || 'Erro ao criar lead')
+      }
+    })
+  }
+
+  return (
+    <div style={{ background: 'rgba(22,27,34,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 14, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <p style={{ fontSize: '0.6rem', fontWeight: 900, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Novo Lead</p>
+      <ClientSearchField
+        clientes={clientes}
+        selected={null}
+        onSelect={(cliente) => {
+          setNome(cliente.nome)
+          setEmpresa(cliente.company_name || cliente.nome)
+          setCnpj(formatCnpj(cliente.documento || ''))
+          setEmail(cliente.email || '')
+          setWhats(cliente.phone || '')
+        }}
+        onClear={() => {}}
+        placeholder="Ja e cliente? Buscar cadastro"
+      />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={cnpj} onChange={e => setCnpj(formatCnpj(e.target.value))} placeholder="CNPJ 00.000.000/0001-00" inputMode="numeric" style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', minWidth: 0, boxSizing: 'border-box' }} />
+        <button type="button" onClick={lookupCnpj} disabled={lookupLoading || cnpj.replace(/\D/g, '').length !== 14} style={{ width: 46, borderRadius: 9, background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.28)', color: '#fbbf24', display: 'grid', placeItems: 'center', cursor: lookupLoading ? 'wait' : 'pointer', flexShrink: 0 }}>
+          {lookupLoading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={16} />}
+        </button>
+      </div>
+      {lookupData && (
+        <div style={{ border: '1px solid rgba(16,185,129,0.22)', background: 'rgba(16,185,129,0.06)', borderRadius: 10, padding: '10px 12px', display: 'grid', gap: 4 }}>
+          <strong style={{ fontSize: '0.8rem', color: '#d1fae5', lineHeight: 1.25 }}>{lookupData.razaoSocial}</strong>
+          {lookupData.nomeFantasia && <span style={{ fontSize: '0.72rem', color: '#86efac' }}>{lookupData.nomeFantasia}</span>}
+          <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>{lookupData.situacao || 'Situacao nao informada'} {lookupData.municipio && lookupData.uf ? `- ${lookupData.municipio}/${lookupData.uf}` : ''}</span>
+          {lookupData.atividadePrincipal && <span style={{ fontSize: '0.68rem', color: '#64748b' }}>{lookupData.atividadePrincipal}</span>}
+        </div>
+      )}
+      <input value={empresa} onChange={e => setEmpresa(e.target.value)} placeholder="Razao social / empresa *" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+      <input value={nome} onChange={e => setNome(e.target.value)} placeholder="Nome do contato / responsavel" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+      <input value={email} onChange={e => setEmail(e.target.value)} placeholder="E-mail" type="email" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+      <input value={whats} onChange={e => setWhats(e.target.value)} placeholder="WhatsApp" type="tel" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+      <input value={atividade} onChange={e => setAtividade(e.target.value)} placeholder="Atividade / CNAE / segmento" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Cidade / Regiao" style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+        <input value={valor} onChange={e => setValor(e.target.value)} placeholder="Valor" style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+      </div>
+      <button onClick={submit} disabled={isPending || (!nome.trim() && !empresa.trim())}
+        style={{ padding: '12px', borderRadius: 10, background: 'linear-gradient(135deg,#b8880a,#fbbf24)', border: 'none', color: '#0a0600', fontWeight: 900, fontSize: '0.88rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        {isPending ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <UserPlus size={16} />}
+        {isPending ? 'Criando...' : 'Criar Lead'}
+      </button>
+    </div>
+  )
+}
+
 function NewLeadInline({ clientes, onDone }: { clientes: ClienteOption[]; onDone: (lead: Lead) => void }) {
   const [nome, setNome]    = useState('')
   const [whats, setWhats]  = useState('')
@@ -876,6 +1132,12 @@ function VozView({ leads }: { leads: Lead[] }) {
     if(phase==='done')      { setPhase('idle'); setLead(null); setResult(null); return }
     if(phase==='recording') { setPhase('processing'); stopTimer(); mrRef.current?.stop(); return }
     if(phase==='ready') {
+      if(typeof window !== 'undefined' && !window.isSecureContext) {
+        toast.error('Microfone bloqueado pelo navegador', {
+          description: 'No celular, gravacao de audio so funciona em HTTPS. Use o link HTTPS local ou Vercel.',
+        })
+        return
+      }
       if(!navigator.mediaDevices?.getUserMedia){ toast.error('Microfone não suportado neste browser'); return }
       let stream: MediaStream
       try {
@@ -1019,10 +1281,92 @@ function VozView({ leads }: { leads: Lead[] }) {
 }
 
 // ── Agenda View ───────────────────────────────────────────────────────────────
-function AgendaView({ agenda }: { agenda: MobileHubProps['agenda'] }) {
+function AgendaView({
+  agenda,
+  leads,
+  userId,
+  selectedLeadId,
+  onCreated,
+}: {
+  agenda: MobileAgendaItem[]
+  leads: Lead[]
+  userId?: string | null
+  selectedLeadId?: string
+  onCreated: (item: MobileAgendaItem) => void
+}) {
+  const [leadId, setLeadId] = useState('')
+  const [scheduledFor, setScheduledFor] = useState('')
+  const [location, setLocation] = useState('')
+  const [objective, setObjective] = useState('')
+  const [isPending, start] = useTransition()
   const hoje = new Date().toDateString()
+  const activeLeads = leads.filter((lead) => lead.stage !== 'Fechado' && lead.stage !== 'Perdido')
+
+  useEffect(() => {
+    if (selectedLeadId) setLeadId(selectedLeadId)
+  }, [selectedLeadId])
+
+  function getValidOwnerId(value?: string | null) {
+    return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : null
+  }
+
+  function submitMeeting() {
+    const lead = leads.find((item) => item.id === leadId)
+    if (!lead) { toast.error('Selecione o lead.'); return }
+    if (!scheduledFor) { toast.error('Informe data e horario.'); return }
+
+    const isoDate = new Date(scheduledFor).toISOString()
+    start(async () => {
+      const title = `Reuniao com ${lead.name}`
+      const result = await createMeeting({
+        title,
+        scheduled_for: isoDate,
+        location: location.trim() || null,
+        meeting_type: 'Presencial',
+        lead_id: lead.id,
+        lead_name: lead.name,
+        company_name: lead.company || null,
+        objective: objective.trim() || null,
+        agenda: objective.trim() || null,
+        owner_profile_id: getValidOwnerId(userId),
+      })
+
+      if (!result.success) {
+        toast.error('Erro ao agendar reuniao', { description: result.error })
+        return
+      }
+
+      onCreated({
+        id: result.data?.id || `local-${Date.now()}`,
+        title,
+        scheduled_for: isoDate,
+        client_name: lead.name,
+        location: location.trim() || null,
+      })
+      setLeadId('')
+      setScheduledFor('')
+      setLocation('')
+      setObjective('')
+      toast.success('Reuniao agendada no CRM.')
+    })
+  }
+
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
+      <div style={{background:'rgba(22,27,34,0.6)',border:'1px solid rgba(125,211,252,0.18)',borderRadius:14,padding:'14px',display:'grid',gap:9}}>
+        <p style={{fontSize:'0.6rem',fontWeight:900,color:'#7dd3fc',textTransform:'uppercase',letterSpacing:'0.1em'}}>Marcar reuniao</p>
+        <select value={leadId} onChange={e => setLeadId(e.target.value)} style={{background:'rgba(13,17,23,0.5)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:9,padding:'10px 12px',color:leadId?'#f0f6fc':'#64748b',fontSize:'0.85rem',outline:'none',fontFamily:'inherit',width:'100%'}}>
+          <option value="">Selecione o lead...</option>
+          {activeLeads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name}{lead.company ? ` - ${lead.company}` : ''}</option>)}
+        </select>
+        <input type="datetime-local" value={scheduledFor} onChange={e => setScheduledFor(e.target.value)} style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:9,padding:'10px 12px',color:'#f0f6fc',fontSize:'0.85rem',outline:'none',fontFamily:'inherit',colorScheme:'dark'}} />
+        <input value={location} onChange={e => setLocation(e.target.value)} placeholder="Local ou endereco" style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:9,padding:'10px 12px',color:'#f0f6fc',fontSize:'0.85rem',outline:'none',fontFamily:'inherit'}} />
+        <textarea value={objective} onChange={e => setObjective(e.target.value)} placeholder="Pauta / objetivo" rows={2} style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:9,padding:'10px 12px',color:'#f0f6fc',fontSize:'0.85rem',outline:'none',fontFamily:'inherit',resize:'none'}} />
+        <button onClick={submitMeeting} disabled={isPending || !leadId || !scheduledFor} style={{padding:'12px',borderRadius:10,background:'rgba(125,211,252,0.12)',border:'1px solid rgba(125,211,252,0.28)',color:'#7dd3fc',fontWeight:900,fontSize:'0.85rem',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+          {isPending ? <Loader2 size={15} style={{animation:'spin 1s linear infinite'}}/> : <CalendarDays size={15}/>}
+          {isPending ? 'Agendando...' : 'Salvar reuniao'}
+        </button>
+      </div>
       <div style={{display:'flex',gap:7}}>
         <StatCard label="Hoje" value={agenda.filter(m=>m.scheduled_for&&new Date(m.scheduled_for).toDateString()===hoje).length} sub="Reuniões" color="#7dd3fc"/>
         <StatCard label="Próximas" value={agenda.length} sub="Agendadas" color="#38bdf8"/>
@@ -1056,10 +1400,16 @@ function AgendaView({ agenda }: { agenda: MobileHubProps['agenda'] }) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-export default function MobileHubClient({ user, leads: initialLeads, clientes, stats, agenda }: MobileHubProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('pipeline')
+function normalizeTab(value?: string): TabId {
+  return ALL_TABS.some((item) => item.id === value) ? value as TabId : 'pipeline'
+}
+
+export default function MobileHubClient({ user, leads: initialLeads, clientes, stats, agenda, initialTab, initialLeadId }: MobileHubProps) {
+  const [activeTab, setActiveTab] = useState<TabId>(normalizeTab(initialTab))
   const [greeting, setGreeting]   = useState('Olá')
   const [leads, setLeads]         = useState<Lead[]>(initialLeads)
+  const [agendaItems, setAgendaItems] = useState<MobileAgendaItem[]>(agenda)
+  const [agendaLeadId, setAgendaLeadId] = useState(initialLeadId || '')
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Consultor'
 
@@ -1177,11 +1527,11 @@ export default function MobileHubClient({ user, leads: initialLeads, clientes, s
 
         {/* ── Conteúdo das abas ── */}
         <div style={{ padding: '0 16px' }}>
-          {activeTab === 'pipeline' && <PipelineView leads={leads} stats={stats} onLeadsChange={setLeads} />}
-          {activeTab === 'agenda'   && <AgendaView agenda={agenda} />}
-          {activeTab === 'radar'    && <RadarView leads={leads} />}
+          {activeTab === 'pipeline' && <PipelineView leads={leads} stats={stats} onLeadsChange={setLeads} onScheduleLead={(lead) => { setAgendaLeadId(lead.id); setActiveTab('agenda') }} />}
+          {activeTab === 'agenda'   && <AgendaView agenda={agendaItems} leads={leads} userId={user?.id} selectedLeadId={agendaLeadId} onCreated={(item) => setAgendaItems((current) => [item, ...current])} />}
+          {activeTab === 'radar'    && <RadarView leads={leads} onScheduleLead={(lead) => { setAgendaLeadId(lead.id); setActiveTab('agenda') }} />}
           {activeTab === 'voz'      && <VozView leads={leads} />}
-          {activeTab === 'lead'     && <NewLeadInline clientes={clientes} onDone={l => { setLeads([l,...leads]); setActiveTab('pipeline') }} />}
+          {activeTab === 'lead'     && <NewLeadInlineFull clientes={clientes} onDone={l => { setLeads([l,...leads]); setActiveTab('pipeline') }} />}
           {activeTab === 'call'     && <LogCallInline leads={leads} />}
           {activeTab === 'contract' && <ContractInline leads={leads} onDone={() => setActiveTab('pipeline')} />}
         </div>
@@ -1192,7 +1542,7 @@ export default function MobileHubClient({ user, leads: initialLeads, clientes, s
       </div>
       </div>
 
-      <FABMenu active={activeTab} onChange={setActiveTab} />
+      <NativeFABMenu active={activeTab} />
 
       <style>{`
         @keyframes spin       { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
@@ -1205,4 +1555,3 @@ export default function MobileHubClient({ user, leads: initialLeads, clientes, s
 }
 
 // SEO Helper: og: name="description" <title>
-

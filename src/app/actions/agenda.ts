@@ -59,9 +59,9 @@ export async function createMeeting(payload: MeetingPayload) {
     const supabase = await createClient()
 
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { success: false, error: 'Nao autorizado.' }
+    const ownerProfileId = payload.owner_profile_id ?? user?.id ?? null
 
-    const ownerName = await getOwnerName(payload.owner_profile_id)
+    const ownerName = await getOwnerName(ownerProfileId)
 
     const { data: meetingData, error } = await supabase
       .from('meetings')
@@ -84,7 +84,7 @@ export async function createMeeting(payload: MeetingPayload) {
         summary: payload.summary ?? payload.notes ?? null,
         next_step: payload.next_step ?? null,
         next_contact_at: payload.next_contact_at ?? null,
-        owner_profile_id: payload.owner_profile_id ?? null,
+        owner_profile_id: ownerProfileId,
         owner_name: ownerName,
         requires_logistics: payload.requires_logistics ?? false,
         event_id: payload.event_id ?? null,
@@ -108,7 +108,7 @@ export async function createMeeting(payload: MeetingPayload) {
       summary: payload.summary ?? payload.notes ?? null,
       nextStep: payload.next_step ?? null,
       nextContactAt: payload.next_contact_at ?? null,
-      consultantId: payload.owner_profile_id ?? null,
+      consultantId: ownerProfileId,
       status: payload.status ?? 'agendada',
     })
 
@@ -119,10 +119,10 @@ export async function createMeeting(payload: MeetingPayload) {
         .eq('id', id)
     }
 
-    if (payload.owner_profile_id) {
+    if (ownerProfileId) {
       try {
         await supabase.from('xp_logs').insert({
-          profile_id: payload.owner_profile_id,
+          profile_id: ownerProfileId,
           action: 'Reuniao agendada',
           xp_amount: 50,
           reference_id: id,

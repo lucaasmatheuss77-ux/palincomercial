@@ -1,17 +1,33 @@
 'use client'
 
+import { useState } from 'react'
 import {
   BarChart3,
   Download,
   Edit3,
   Eye,
   Flag,
+  ListChecks,
+  Loader2,
   LockKeyhole,
+  Paperclip,
+  Plus,
   Rocket,
   ShieldAlert,
   Target,
+  Trash2,
   TrendingUp,
+  Upload,
 } from 'lucide-react'
+import { toast } from 'sonner'
+import ActionDialog from '@/components/action-dialog'
+import {
+  createStrategicPlanItem,
+  deleteStrategicPlanItem,
+  updateStrategicPlanItem,
+  uploadStrategicPlanFile,
+  type StrategicPlanItem,
+} from '@/app/actions/planejamento'
 
 const pillars = [
   {
@@ -126,7 +142,36 @@ function SectionTitle({
   )
 }
 
-export default function PlanejamentoClient({ canEdit = false, stats }: { canEdit?: boolean; stats: PlanningStats }) {
+const emptyItemDraft = {
+  title: '',
+  description: '',
+  category: 'geral',
+  target_value: '',
+  current_value: '',
+  unit: '',
+  due_date: '',
+  status: 'em_andamento',
+  owner_id: '',
+}
+
+const STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  em_andamento: { label: 'Em andamento', color: '#60a5fa' },
+  concluido: { label: 'Concluído', color: '#86efac' },
+  atrasado: { label: 'Atrasado', color: '#f87171' },
+  planejado: { label: 'Planejado', color: '#c084fc' },
+}
+
+export default function PlanejamentoClient({
+  canEdit = false,
+  stats,
+  items: initialItems = [],
+  owners = [],
+}: {
+  canEdit?: boolean
+  stats: PlanningStats
+  items?: StrategicPlanItem[]
+  owners?: { id: string; name: string }[]
+}) {
   const numericGoals = buildNumericGoals(stats)
   const risks = [
     stats.clientesAvencer > 0
@@ -134,6 +179,98 @@ export default function PlanejamentoClient({ canEdit = false, stats }: { canEdit
       : 'Nenhum cliente com contrato vencendo nos próximos 12 meses no momento.',
     ...staticRisks,
   ]
+
+  const [items, setItems] = useState<StrategicPlanItem[]>(initialItems)
+  const [itemDialogOpen, setItemDialogOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState<StrategicPlanItem | null>(null)
+  const [itemDraft, setItemDraft] = useState(emptyItemDraft)
+  const [savingItem, setSavingItem] = useState(false)
+  const [uploadingItemId, setUploadingItemId] = useState<string | null>(null)
+
+  function openNewItem() {
+    setEditingItem(null)
+    setItemDraft(emptyItemDraft)
+    setItemDialogOpen(true)
+  }
+
+  function openEditItem(item: StrategicPlanItem) {
+    setEditingItem(item)
+    setItemDraft({
+      title: item.title,
+      description: item.description || '',
+      category: item.category || 'geral',
+      target_value: item.target_value != null ? String(item.target_value) : '',
+      current_value: item.current_value != null ? String(item.current_value) : '',
+      unit: item.unit || '',
+      due_date: item.due_date || '',
+      status: item.status,
+      owner_id: item.owner_id || '',
+    })
+    setItemDialogOpen(true)
+  }
+
+  function closeItemDialog() {
+    setItemDialogOpen(false)
+    setEditingItem(null)
+    setItemDraft(emptyItemDraft)
+  }
+
+  async function handleSaveItem() {
+    if (!itemDraft.title.trim()) { toast.error('Informe o título do item.'); return }
+    setSavingItem(true)
+    try {
+      const payload = {
+        title: itemDraft.title,
+        description: itemDraft.description || null,
+        category: itemDraft.category || 'geral',
+        target_value: itemDraft.target_value ? Number(itemDraft.target_value) : null,
+        current_value: itemDraft.current_value ? Number(itemDraft.current_value) : 0,
+        unit: itemDraft.unit || null,
+        due_date: itemDraft.due_date || null,
+        status: itemDraft.status,
+        owner_id: itemDraft.owner_id || null,
+      }
+      const result = editingItem
+        ? await updateStrategicPlanItem(editingItem.id, payload)
+        : await createStrategicPlanItem(payload)
+      if (!result.success) { toast.error(result.error || 'Erro ao salvar item.'); return }
+
+      const owner = owners.find((o) => o.id === itemDraft.owner_id)
+      if (editingItem) {
+        setItems((current) => current.map((item) => item.id === editingItem.id ? { ...item, ...payload, owner_name: owner?.name || null } : item))
+      } else {
+        const newId = (result as { data?: { id: string } }).data?.id || crypto.randomUUID()
+        setItems((current) => [{ id: newId, ...payload, owner_name: owner?.name || null, file_path: null, file_name: null, file_signed_url: null, created_at: new Date().toISOString() }, ...current])
+      }
+      toast.success(editingItem ? 'Item atualizado.' : 'Item criado.')
+      closeItemDialog()
+    } finally {
+      setSavingItem(false)
+    }
+  }
+
+  async function handleDeleteItem(item: StrategicPlanItem) {
+    if (!confirm(`Excluir o item "${item.title}"?`)) return
+    const result = await deleteStrategicPlanItem(item.id)
+    if (!result.success) { toast.error(result.error || 'Erro ao excluir item.'); return }
+    setItems((current) => current.filter((row) => row.id !== item.id))
+    toast.success('Item excluído.')
+  }
+
+  async function handleUploadItemFile(item: StrategicPlanItem, file: File) {
+    setUploadingItemId(item.id)
+    try {
+      const formData = new FormData()
+      formData.append('item_id', item.id)
+      formData.append('file', file)
+      const result = await uploadStrategicPlanFile(formData)
+      if (!result.success) { toast.error(result.error || 'Erro ao enviar arquivo.'); return }
+      setItems((current) => current.map((row) => row.id === item.id ? { ...row, file_name: file.name } : row))
+      toast.success('Arquivo anexado. Recarregue a página para abrir o link.')
+    } finally {
+      setUploadingItemId(null)
+    }
+  }
 
   function handleExport() {
     const rows = [
@@ -171,9 +308,9 @@ export default function PlanejamentoClient({ canEdit = false, stats }: { canEdit
             <Download size={16} />
             Exportar
           </button>
-          <button type="button" className="planning-button primary" disabled={!canEdit}>
-            <Edit3 size={16} />
-            Editar plano
+          <button type="button" className="planning-button primary" disabled={!canEdit} onClick={openNewItem}>
+            <Plus size={16} />
+            Adicionar item ao plano
           </button>
         </div>
       </section>
@@ -209,6 +346,81 @@ export default function PlanejamentoClient({ canEdit = false, stats }: { canEdit
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="glass-card planning-card">
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <SectionTitle icon={ListChecks} title="Itens do plano" subtitle="Crie, acompanhe e anexe documentos aos itens do planejamento." />
+          <button type="button" className="planning-button primary" disabled={!canEdit} onClick={openNewItem} style={{ minHeight: '38px' }}>
+            <Plus size={15} />
+            Novo item
+          </button>
+        </div>
+        {items.length === 0 ? (
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--brand-muted)', border: '1px dashed rgba(255,255,255,0.09)', borderRadius: '10px' }}>
+            Nenhum item cadastrado ainda. {canEdit ? 'Clique em "Novo item" para começar.' : ''}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '10px' }}>
+            {items.map((item) => {
+              const statusInfo = STATUS_LABEL[item.status] || STATUS_LABEL.em_andamento
+              const progress = item.target_value ? Math.min(100, Math.round(((item.current_value || 0) / item.target_value) * 100)) : null
+              return (
+                <div key={item.id} style={{ border: '1px solid rgba(255,255,255,0.07)', borderRadius: '10px', background: 'rgba(255,255,255,0.02)', padding: '14px 16px', display: 'grid', gap: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <strong style={{ color: 'var(--brand-text)', fontSize: '0.92rem' }}>{item.title}</strong>
+                        <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '0.65rem', fontWeight: 800, color: statusInfo.color, background: `${statusInfo.color}1a`, border: `1px solid ${statusInfo.color}40`, textTransform: 'uppercase' }}>
+                          {statusInfo.label}
+                        </span>
+                      </div>
+                      {item.description && <p style={{ color: 'var(--brand-muted)', fontSize: '0.8rem', margin: '4px 0 0' }}>{item.description}</p>}
+                      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '6px', fontSize: '0.74rem', color: '#8da2c2' }}>
+                        {item.owner_name && <span>Responsável: {item.owner_name}</span>}
+                        {item.due_date && <span>Prazo: {new Date(`${item.due_date}T12:00:00`).toLocaleDateString('pt-BR')}</span>}
+                        {item.target_value != null && <span>{item.current_value || 0} / {item.target_value} {item.unit}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      {item.file_signed_url ? (
+                        <a href={item.file_signed_url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#60a5fa', fontSize: '0.75rem', fontWeight: 700, textDecoration: 'none' }}>
+                          <Paperclip size={13} /> {item.file_name}
+                        </a>
+                      ) : canEdit ? (
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#94a3b8', fontSize: '0.75rem', fontWeight: 700, cursor: uploadingItemId === item.id ? 'wait' : 'pointer', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '6px 10px' }}>
+                          {uploadingItemId === item.id ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                          Anexar
+                          <input
+                            type="file"
+                            style={{ display: 'none' }}
+                            disabled={uploadingItemId === item.id}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0]
+                              if (file) void handleUploadItemFile(item, file)
+                              event.target.value = ''
+                            }}
+                          />
+                        </label>
+                      ) : null}
+                      {canEdit && (
+                        <>
+                          <button type="button" onClick={() => openEditItem(item)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }} aria-label="Editar item"><Edit3 size={15} /></button>
+                          <button type="button" onClick={() => void handleDeleteItem(item)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }} aria-label="Excluir item"><Trash2 size={15} /></button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {progress !== null && (
+                    <div style={{ height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${progress}%`, background: progress >= 100 ? '#22c55e' : 'var(--brand-primary)', transition: 'width 0.4s ease' }} />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </section>
 
       <section className="glass-card planning-card">
@@ -270,6 +482,70 @@ export default function PlanejamentoClient({ canEdit = false, stats }: { canEdit
           </p>
         </div>
       </section>
+
+      <ActionDialog
+        open={itemDialogOpen}
+        title={editingItem ? 'Editar item do plano' : 'Novo item do plano'}
+        subtitle="Defina o que precisa ser feito, a meta numérica (se houver) e o responsável."
+        onClose={closeItemDialog}
+        footer={
+          <>
+            <button type="button" className="btn-ghost" onClick={closeItemDialog}>Cancelar</button>
+            <button type="button" className="btn-primary" onClick={() => void handleSaveItem()} disabled={savingItem}>
+              {savingItem ? 'Salvando...' : editingItem ? 'Salvar alterações' : 'Criar item'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'grid', gap: '16px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '7px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>Título *</label>
+            <input className="input-field" placeholder="Ex: Lançar campanha de ICMS" value={itemDraft.title} onChange={(e) => setItemDraft((c) => ({ ...c, title: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '7px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>Descrição</label>
+            <textarea className="input-field" rows={2} placeholder="Detalhe o que precisa ser feito" value={itemDraft.description} onChange={(e) => setItemDraft((c) => ({ ...c, description: e.target.value }))} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '7px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>Meta numérica (opcional)</label>
+              <input className="input-field" type="number" placeholder="Ex: 20" value={itemDraft.target_value} onChange={(e) => setItemDraft((c) => ({ ...c, target_value: e.target.value }))} />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '7px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>Valor atual</label>
+              <input className="input-field" type="number" placeholder="Ex: 8" value={itemDraft.current_value} onChange={(e) => setItemDraft((c) => ({ ...c, current_value: e.target.value }))} />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '7px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>Unidade</label>
+              <input className="input-field" placeholder="Ex: contratos, R$, %" value={itemDraft.unit} onChange={(e) => setItemDraft((c) => ({ ...c, unit: e.target.value }))} />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '7px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>Prazo</label>
+              <input className="input-field" type="date" value={itemDraft.due_date} onChange={(e) => setItemDraft((c) => ({ ...c, due_date: e.target.value }))} />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '7px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>Status</label>
+              <select className="input-field" value={itemDraft.status} onChange={(e) => setItemDraft((c) => ({ ...c, status: e.target.value }))}>
+                <option value="planejado">Planejado</option>
+                <option value="em_andamento">Em andamento</option>
+                <option value="concluido">Concluído</option>
+                <option value="atrasado">Atrasado</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '7px', color: '#c9d1d9', fontSize: '0.8rem', fontWeight: 700 }}>Responsável</label>
+              <select className="input-field" value={itemDraft.owner_id} onChange={(e) => setItemDraft((c) => ({ ...c, owner_id: e.target.value }))}>
+                <option value="">— Sem responsável definido —</option>
+                {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+      </ActionDialog>
 
       <style>{`
         .planning-shell {

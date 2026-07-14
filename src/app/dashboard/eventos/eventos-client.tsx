@@ -194,18 +194,19 @@ export default function EventosClient({ initialEvents, profiles = [] }: { initia
         local: draftLocation || undefined,
       })
       if (result.success) {
-        // If external event and a consultant was selected, allocate them right away
-        if (draftTipo === 'externo' && draftConsultant && result.event?.id) {
-          await assignEventStaff(
-            result.event.id,
-            draftConsultant,
-            draftName,
-            draftDate || new Date().toISOString(),
-            draftEndsAt || undefined,
-          )
+        if (draftTipo === 'externo' && selectedProfileIds.length > 0 && result.event?.id) {
+          await Promise.all(selectedProfileIds.map(async (pid) => {
+            await assignEventStaff(
+              result.event!.id,
+              pid,
+              draftName,
+              draftDate || new Date().toISOString(),
+              draftEndsAt || undefined,
+            )
+          }))
         }
-        toast.success(draftTipo === 'externo' && draftConsultant
-          ? 'Evento salvo e consultor alocado na agenda!'
+        toast.success(draftTipo === 'externo' && selectedProfileIds.length > 0
+          ? 'Evento salvo e consultores alocados na agenda!'
           : 'Evento salvo na agenda.'
         )
         resetCreateForm()

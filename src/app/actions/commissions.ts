@@ -161,6 +161,42 @@ export async function markCommissionPaid(commissionId: string) {
   return { success: true }
 }
 
+export async function createManualCommission(input: {
+  profileId: string
+  productId: string | null
+  amount: number
+  status: 'pendente' | 'pago'
+  notes: string | null
+}) {
+  const { user, role, supabase } = await getAuthUserRole()
+  if (!user) return { success: false, error: 'Nao autorizado.' }
+  if (!role || !ADMIN_ROLES.includes(role)) return { success: false, error: 'Sem permissao para lancar comissao.' }
+
+  if (!input.profileId) return { success: false, error: 'Selecione o consultor.' }
+  if (!input.amount || input.amount <= 0) return { success: false, error: 'Informe um valor de comissao valido.' }
+
+  const { error } = await supabase.from('commissions').insert({
+    profile_id: input.profileId,
+    product_id: input.productId || null,
+    deal_id: null,
+    amount: Math.round(input.amount * 100) / 100,
+    type: 'MANUAL',
+    commission_type: 'MANUAL',
+    status: input.status,
+    variavel_paga: input.status === 'pago',
+    notes: input.notes || '',
+  })
+
+  if (error) {
+    console.error('Erro ao lancar comissao manual:', error)
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath('/dashboard/comissoes')
+  revalidatePath('/dashboard')
+  return { success: true }
+}
+
 export async function createCommissionRule(data: any) {
   // Mantido igual ao original
   const { user, role, supabase } = await getAuthUserRole()

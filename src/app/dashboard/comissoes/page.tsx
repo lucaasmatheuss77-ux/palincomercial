@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import DownloadActionButton from '@/components/download-action-button'
 import CommissionPayButton from './commission-pay-button'
 import CommissionRulesManager, { RuleType } from './commission-rules-manager'
+import CommissionManualEntry from './commission-manual-entry'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,6 +24,7 @@ type DbCommission = {
   created_at: string
   profile: { full_name: string | null } | null
   deal: { value: number | null; product: { name: string } | null } | null
+  product: { name: string } | null
 }
 
 type DbProduct = {
@@ -30,10 +32,15 @@ type DbProduct = {
   name: string
 }
 
+type DbProfile = {
+  id: string
+  full_name: string | null
+}
+
 export default async function ComissoesPage() {
   const supabase = await createClient()
 
-  const [{ data: dbRules }, { data: dbCommissions }, { data: productsData }] = await Promise.all([
+  const [{ data: dbRules }, { data: dbCommissions }, { data: productsData }, { data: profilesData }] = await Promise.all([
     supabase
       .from('commission_rules')
       .select('id, base_rate, base_fixed, recurrent_rate, sdr_rate, notes, product_id, product:products(name)')
@@ -43,10 +50,12 @@ export default async function ComissoesPage() {
       .select(`
         id, amount, status, created_at,
         profile:profiles(full_name),
-        deal:deals(value, product:products(name))
+        deal:deals(value, product:products(name)),
+        product:products(name)
       `)
       .order('created_at', { ascending: false }),
     supabase.from('products').select('id, name').order('name'),
+    supabase.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
   ])
 
   const rules: RuleType[] = (dbRules as unknown as DbRule[] || []).map((rule) => ({
@@ -64,7 +73,7 @@ export default async function ComissoesPage() {
   const commissions = (dbCommissions as unknown as DbCommission[] || []).map((commission) => ({
     id: commission.id,
     name: commission.profile?.full_name?.split(' ')[0] || 'Desconhecido',
-    produto: commission.deal?.product?.name || 'Venda',
+    produto: commission.deal?.product?.name || commission.product?.name || 'Lançamento manual',
     valor: Number(commission.deal?.value || 0),
     comissao: Number(commission.amount || 0),
     status: commission.status,
@@ -72,6 +81,7 @@ export default async function ComissoesPage() {
   }))
 
   const products = (productsData as DbProduct[] || []).map((p) => ({ id: p.id, name: p.name }))
+  const consultants = (profilesData as DbProfile[] || []).map((p) => ({ id: p.id, name: p.full_name || 'Sem nome' }))
 
   const total = commissions.reduce((sum, c) => sum + c.comissao, 0)
   const totalPago = commissions.filter((c) => c.status === 'pago').reduce((sum, c) => sum + c.comissao, 0)
@@ -89,9 +99,12 @@ export default async function ComissoesPage() {
           <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--brand-text)', letterSpacing: '-0.02em' }}>Comissoes</h1>
           <p style={{ color: 'var(--brand-muted)', fontSize: '0.84rem', marginTop: '4px' }}>{commissions.length} {commissions.length === 1 ? 'registro' : 'registros'}</p>
         </div>
-        <DownloadActionButton className="btn-primary" fileName="comissoes.csv" content={exportContent} successMessage="Extrato exportado.">
-          Exportar CSV
-        </DownloadActionButton>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <CommissionManualEntry consultants={consultants} products={products} />
+          <DownloadActionButton className="btn-primary" fileName="comissoes.csv" content={exportContent} successMessage="Extrato exportado.">
+            Exportar CSV
+          </DownloadActionButton>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>

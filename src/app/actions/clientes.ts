@@ -28,6 +28,10 @@ export type ClientRecord = {
   name: string
   company_name?: string | null
   documento?: string | null
+  segmento?: string | null
+  cidade?: string | null
+  estado?: string | null
+  notas?: string | null
   email?: string | null
   phone?: string | null
   whatsapp?: string | null
@@ -88,6 +92,10 @@ type ClientInput = {
   name?: string
   company_name?: string | null
   documento?: string | null
+  segmento?: string | null
+  cidade?: string | null
+  estado?: string | null
+  notas?: string | null
   email?: string | null
   phone?: string | null
   whatsapp?: string | null
@@ -153,6 +161,23 @@ function textOrNull(value?: string | null) {
 function normalizeDocument(value?: string | null) {
   const digits = value?.replace(/\D/g, '') || ''
   return digits || null
+}
+
+function formatDocument(value: string) {
+  if (value.length === 14) {
+    return value
+      .replace(/^(\d{2})(\d)/, '$1.$2')
+      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1/$2')
+      .replace(/(\d{4})(\d)/, '$1-$2')
+  }
+  if (value.length === 11) {
+    return value
+      .replace(/^(\d{3})(\d)/, '$1.$2')
+      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1-$2')
+  }
+  return value
 }
 
 async function insertLeadWithSchemaFallback(
@@ -351,7 +376,7 @@ async function getClientForLead(supabase: SupabaseServerClient, lead: LeadSnapsh
     const { data, error } = await supabase
       .from('clientes')
       .select('*')
-      .eq('documento', document)
+      .in('documento', [document, formatDocument(document)])
       .limit(1)
       .maybeSingle()
 
@@ -632,6 +657,9 @@ export async function createClientRecord(
     }
 
     existingClient = (byDocument as ClientRecord | null) || null
+    if (existingClient?.id) {
+      return { success: false, error: 'Documento já cadastrado. Não é permitido duplicar CNPJ/CPF.', data: existingClient }
+    }
   }
 
   if (clientsTableAvailable && !existingClient && email) {
@@ -657,6 +685,10 @@ export async function createClientRecord(
       name,
       company_name: textOrNull(data.company_name),
       documento: document,
+      segmento: textOrNull(data.segmento),
+      cidade: textOrNull(data.cidade),
+      estado: textOrNull(data.estado),
+      notas: textOrNull(data.notas),
       email,
       phone: textOrNull(data.phone),
       whatsapp: textOrNull(data.whatsapp),
@@ -744,7 +776,7 @@ export async function createClientRecord(
       activityType: 'client_created',
       subject: `Cliente ${name} enviado ao CRM`,
       summary: [`Etapa inicial: ${crmStage}`, clientPayload.company_name ? `Empresa: ${clientPayload.company_name}` : null].filter(Boolean).join(' | '),
-      nextStep: crmStage === 'Fechado' ? 'Gerar contrato e anexar documentos.' : 'Entrar em contato e agendar primeira reuniao.',
+      nextStep: crmStage === 'Fechado' ? 'Gerar contrato e anexar documentos.' : 'Entrar em contato e agendar primeira reunião.',
       status: 'registrada',
     })
   }
@@ -1088,6 +1120,10 @@ export async function updateClient(
     name: textOrNull(data.name) || (currentClient as ClientRecord).name,
     company_name: data.company_name === undefined ? (currentClient as ClientRecord).company_name ?? null : textOrNull(data.company_name),
     documento: data.documento === undefined ? (currentClient as ClientRecord).documento ?? null : normalizeDocument(data.documento) ?? textOrNull(data.documento),
+    segmento: data.segmento === undefined ? (currentClient as ClientRecord).segmento ?? null : textOrNull(data.segmento),
+    cidade: data.cidade === undefined ? (currentClient as ClientRecord).cidade ?? null : textOrNull(data.cidade),
+    estado: data.estado === undefined ? (currentClient as ClientRecord).estado ?? null : textOrNull(data.estado),
+    notas: data.notas === undefined ? (currentClient as ClientRecord).notas ?? null : textOrNull(data.notas),
     email: data.email === undefined ? (currentClient as ClientRecord).email ?? null : textOrNull(data.email),
     phone: data.phone === undefined ? (currentClient as ClientRecord).phone ?? null : textOrNull(data.phone),
     whatsapp: data.whatsapp === undefined ? (currentClient as ClientRecord).whatsapp ?? null : textOrNull(data.whatsapp),
@@ -1100,6 +1136,26 @@ export async function updateClient(
       data.produto_foco_id === undefined
         ? (currentClient as ClientRecord).product_id ?? null
         : data.produto_foco_id,
+  }
+
+  const nextDocument = payload.documento
+  if (nextDocument && nextDocument !== ((currentClient as ClientRecord).documento ?? null)) {
+    const { data: duplicate, error: duplicateError } = await supabase
+      .from('clientes')
+      .select('id, name, company_name')
+      .in('documento', [nextDocument, formatDocument(nextDocument)])
+      .neq('id', clienteId)
+      .limit(1)
+      .maybeSingle()
+
+    if (duplicateError && !isMissingSchemaError(duplicateError)) {
+      return { success: false, error: duplicateError.message }
+    }
+
+    if (duplicate) {
+      const owner = (duplicate as { company_name?: string | null; name?: string | null }).company_name || (duplicate as { name?: string | null }).name || 'cliente cadastrado'
+      return { success: false, error: `Documento já cadastrado para ${owner}. Não é permitido duplicar CNPJ/CPF.` }
+    }
   }
 
   const { data: updatedClient, error } = await supabase
@@ -1149,7 +1205,7 @@ export async function saveClientContract(
   )
 
   if (!contract) {
-    return { success: false, error: 'Nao foi possivel salvar o contrato.' }
+    return { success: false, error: 'Não foi possível salvar o contrato.' }
   }
 
   const clientId = payload.client_id ?? contract.client_id ?? null
@@ -1221,7 +1277,7 @@ export async function uploadContractPdf(
 
   if (file) {
     if (!uploadPath) {
-      return { success: false, error: 'Nao foi possivel definir o caminho do arquivo.' }
+      return { success: false, error: 'Não foi possível definir o caminho do arquivo.' }
     }
 
     const { error: uploadError } = await supabase.storage.from(bucket).upload(uploadPath, file, {
@@ -1269,7 +1325,7 @@ export async function uploadContractPdf(
       await supabase.storage.from(bucket).remove([storedPath]).catch(() => {})
     }
 
-    return { success: false, error: 'Nao foi possivel registrar o PDF do contrato.' }
+    return { success: false, error: 'Não foi possível registrar o PDF do contrato.' }
   }
 
   const { data: authData } = await supabase.auth.getUser()
@@ -1390,7 +1446,7 @@ export async function activateContract(
   )
 
   if (!updatedContract) {
-    return { success: false, error: 'Nao foi possivel ativar o contrato.' }
+    return { success: false, error: 'Não foi possível ativar o contrato.' }
   }
 
   const clientId =
@@ -1477,7 +1533,7 @@ export async function cancelContract(
   )
 
   if (!updatedContract) {
-    return { success: false, error: 'Nao foi possivel cancelar o contrato.' }
+    return { success: false, error: 'Não foi possível cancelar o contrato.' }
   }
 
   const clientId =
@@ -1551,7 +1607,7 @@ export async function renewContract(
   )
 
   if (!archivedContract) {
-    return { success: false, error: 'Nao foi possivel arquivar o contrato atual para renovacao.' }
+    return { success: false, error: 'Não foi possível arquivar o contrato atual para renovação.' }
   }
 
   let nextDealId = payload.new_deal_id ?? null
@@ -1570,7 +1626,7 @@ export async function renewContract(
       .maybeSingle()
 
     if (dealError || !createdDeal?.id) {
-      return { success: false, error: dealError?.message || 'Nao foi possivel gerar o novo deal da renovacao.' }
+      return { success: false, error: dealError?.message || 'Não foi possível gerar o novo deal da renovação.' }
     }
 
     nextDealId = createdDeal.id
@@ -1595,7 +1651,7 @@ export async function renewContract(
   )
 
   if (!renewedContract) {
-    return { success: false, error: 'Nao foi possivel gerar a renovacao.' }
+    return { success: false, error: 'Não foi possível gerar a renovação.' }
   }
 
   const clientId =

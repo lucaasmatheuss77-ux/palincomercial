@@ -163,9 +163,10 @@ export default function AnaliseCreditoTable({
   const [ops, setOps] = useState(initialOperations)
   const [tab, setTab] = useState<'Open' | 'Closed'>('Open')
   const [clientFilter, setClientFilter] = useState('Todos')
+  const [companyFilter, setCompanyFilter] = useState('Todas')
   const [monthFilter, setMonthFilter] = useState('Todos')
   const [search, setSearch] = useState('')
-  const [grouped, setGrouped] = useState(false)
+  const [grouped, setGrouped] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [isClosing, setIsClosing] = useState(false)
   const [modal, setModal] = useState(false)
@@ -184,6 +185,10 @@ export default function AnaliseCreditoTable({
   // Só valores que realmente existem em `ops` entram no filtro, para o cliente selecionado
   // sempre bater exatamente com os lançamentos (e o botão "Encerrar mês" nunca ficar preso).
   const clients = useMemo(() => [...new Set(ops.map((op) => op.cliente).filter(Boolean))].sort(), [ops])
+  const companies = useMemo(() => {
+    const relevant = clientFilter === 'Todos' ? ops : ops.filter((op) => op.cliente === clientFilter)
+    return [...new Set(relevant.map((op) => op.empresa || op.cliente).filter(Boolean))].sort()
+  }, [ops, clientFilter])
 
   async function fetchFiliaisForClient(clientId: string) {
     setFormFiliaisLoading(true)
@@ -215,18 +220,26 @@ export default function AnaliseCreditoTable({
   }
 
   const months = useMemo(() => {
-    const relevant = clientFilter === 'Todos' ? ops : ops.filter((op) => op.cliente === clientFilter)
+    const relevant = ops.filter((op) => {
+      const matchesClient = clientFilter === 'Todos' || op.cliente === clientFilter
+      const matchesCompany = companyFilter === 'Todas' || (op.empresa || op.cliente) === companyFilter
+      return matchesClient && matchesCompany
+    })
     return [...new Set(relevant.map((op) => op.month_year).filter(Boolean))].sort(
       (a, b) => monthSortKey(a) - monthSortKey(b)
     )
-  }, [ops, clientFilter])
+  }, [ops, clientFilter, companyFilter])
+
+  useEffect(() => {
+    if (companyFilter !== 'Todas' && !companies.includes(companyFilter)) setCompanyFilter('Todas')
+  }, [companies, companyFilter])
 
   useEffect(() => {
     if (monthFilter !== 'Todos' && !months.includes(monthFilter)) setMonthFilter('Todos')
   }, [months, monthFilter])
 
   useEffect(() => {
-    setGrouped(tab === 'Closed')
+    setGrouped(true)
   }, [tab])
 
   function goToMonth(direction: 1 | -1) {
@@ -250,11 +263,12 @@ export default function AnaliseCreditoTable({
         return (
           matchesSearch &&
           (clientFilter === 'Todos' || op.cliente === clientFilter) &&
+          (companyFilter === 'Todas' || (op.empresa || op.cliente) === companyFilter) &&
           (monthFilter === 'Todos' || op.month_year === monthFilter) &&
           op.status_fechamento === tab
         )
       }),
-    [ops, search, clientFilter, monthFilter, tab]
+    [ops, search, clientFilter, companyFilter, monthFilter, tab]
   )
 
   const kpis = useMemo(() => {
@@ -267,60 +281,77 @@ export default function AnaliseCreditoTable({
     return { totalVendas, totalIcms, totalHonorarios, mediaHonorarios, count: filtered.length }
   }, [filtered])
 
-  const selectedClientStats = useMemo(() => {
-    if (clientFilter === 'Todos') return null
-    const clientOps = ops.filter((op) => op.cliente === clientFilter)
-    const branches = new Set(clientOps.map((op) => op.propriedade || op.empresa).filter(Boolean))
+  const selectedCompanyStats = useMemo(() => {
+    if (companyFilter === 'Todas') return null
+    const companyOps = ops.filter((op) => (op.empresa || op.cliente) === companyFilter)
+    const closedMonths = new Set(companyOps.filter((op) => op.status_fechamento === 'Closed').map((op) => op.month_year).filter(Boolean))
+    const branches = new Set(companyOps.map((op) => op.propriedade).filter(Boolean))
     return {
-      operations: clientOps.length,
+      operations: companyOps.length,
+      closedMonths: closedMonths.size,
       branches: branches.size,
-      sales: clientOps.reduce((sum, op) => sum + Number(op.valor_venda), 0),
-      honorarios: clientOps.reduce((sum, op) => sum + Number(op.valor_honorarios), 0),
+      sales: companyOps.reduce((sum, op) => sum + Number(op.valor_venda), 0),
+      honorarios: companyOps.reduce((sum, op) => sum + Number(op.valor_honorarios), 0),
     }
-  }, [ops, clientFilter])
+  }, [ops, companyFilter])
 
   const groups = useMemo(() => {
-    const groupedOps: Record<string, { ops: IcmsOperation[]; venda: number; icms: number; honorarios: number }> = {}
+    const groupedOps: Record<string, { label: string; detail: string; ops: IcmsOperation[]; venda: number; icms: number; honorarios: number }> = {}
     filtered.forEach((op) => {
-      groupedOps[op.cliente] ||= { ops: [], venda: 0, icms: 0, honorarios: 0 }
-      groupedOps[op.cliente].ops.push(op)
-      groupedOps[op.cliente].venda += Number(op.valor_venda)
-      groupedOps[op.cliente].icms += Number(op.valor_icms)
-      groupedOps[op.cliente].honorarios += Number(op.valor_honorarios)
+      const empresa = op.empresa || op.cliente
+      const key = tab === 'Closed' ? `${op.month_year}__${empresa}` : empresa
+      groupedOps[key] ||= {
+        label: tab === 'Closed' ? op.month_year : empresa,
+        detail: tab === 'Closed' ? empresa : op.cliente,
+        ops: [],
+        venda: 0,
+        icms: 0,
+        honorarios: 0,
+      }
+      groupedOps[key].ops.push(op)
+      groupedOps[key].venda += Number(op.valor_venda)
+      groupedOps[key].icms += Number(op.valor_icms)
+      groupedOps[key].honorarios += Number(op.valor_honorarios)
     })
     return Object.entries(groupedOps).sort((a, b) => b[1].honorarios - a[1].honorarios)
-  }, [filtered])
+  }, [filtered, tab])
 
-  const canClose = tab === 'Open' && clientFilter !== 'Todos' && monthFilter !== 'Todos' && filtered.length > 0
+  const groupKeys = groups.map(([key]) => key).join('|')
+  useEffect(() => {
+    setExpanded(new Set(groupKeys ? groupKeys.split('|') : []))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupKeys])
 
-  function toggleGroup(cliente: string) {
+  const canClose = tab === 'Open' && companyFilter !== 'Todas' && monthFilter !== 'Todos' && filtered.length > 0
+
+  function toggleGroup(key: string) {
     setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(cliente)) next.delete(cliente)
-      else next.add(cliente)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
   async function closeMonth() {
     if (!canClose) {
-      toast.error('Selecione um cliente e um periodo especificos.')
+      toast.error('Selecione uma empresa e um período específicos.')
       return
     }
 
     setIsClosing(true)
     try {
-      const result = await closeIcmsMonthForClient({ cliente: clientFilter, monthYear: monthFilter })
+      const result = await closeIcmsMonthForClient({ empresa: companyFilter, monthYear: monthFilter })
       if (!result.success) throw new Error(result.error)
       setOps((current) =>
         current.map((op) =>
-          op.month_year === monthFilter && op.cliente === clientFilter ? { ...op, status_fechamento: 'Closed' } : op
+          op.month_year === monthFilter && (op.empresa || op.cliente) === companyFilter ? { ...op, status_fechamento: 'Closed' } : op
         )
       )
-      toast.success('Mes encerrado.', { description: `${clientFilter} - ${monthFilter}` })
+      toast.success('Fechamento encerrado.', { description: `${monthFilter} - ${companyFilter}` })
       setTab('Closed')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erro ao encerrar mes.')
+      toast.error(error instanceof Error ? error.message : 'Erro ao encerrar mês.')
     } finally {
       setIsClosing(false)
     }
@@ -331,6 +362,7 @@ export default function AnaliseCreditoTable({
     setForm({
       ...defaultIcmsForm,
       cliente: clientFilter !== 'Todos' ? clientFilter : defaultIcmsForm.cliente,
+      empresa: companyFilter !== 'Todas' ? companyFilter : defaultIcmsForm.empresa,
       month_year: monthFilter !== 'Todos' ? monthFilter : defaultIcmsForm.month_year,
     })
     setFormFiliais([])
@@ -428,9 +460,9 @@ export default function AnaliseCreditoTable({
         <td>
           <span className="analise-client-chip">
             <Building2 size={13} aria-hidden="true" />
-            {op.cliente}
+            {op.empresa || op.cliente}
           </span>
-          {op.propriedade && <small>{op.propriedade}</small>}
+          <small>{[op.cliente, op.propriedade].filter(Boolean).join(' · ')}</small>
         </td>
         <td>
           <code>{op.nota_fiscal}</code>
@@ -470,31 +502,58 @@ export default function AnaliseCreditoTable({
       </div>
 
       <section className="analise-kpi-grid">
-        <MetricCard label="Operacoes" value={kpis.count} detail="registros filtrados" icon={TrendingUp} tone="info" />
-        <MetricCard label="Total vendas" value={brl(kpis.totalVendas)} detail="volume movimentado" icon={DollarSign} tone="sales" />
-        <MetricCard label="ICMS liberado" value={brl(kpis.totalIcms)} detail="credito transferido" icon={FileText} tone="credit" />
+        <MetricCard label="Operacoes" value={kpis.count} detail="registros no filtro atual" icon={TrendingUp} tone="info" />
+        <MetricCard label="Total Vendas" value={brl(kpis.totalVendas)} detail="somatório do período selecionado" icon={DollarSign} tone="sales" />
+        <MetricCard label="ICMS Liberado" value={brl(kpis.totalIcms)} detail="somatório de crédito transferido" icon={FileText} tone="credit" />
         <MetricCard
-          label="Honorarios"
+          label="Honorários"
           value={brl(kpis.totalHonorarios)}
-          detail={`${kpis.mediaHonorarios.toFixed(1)}% medio`}
+          detail={kpis.count > 0 ? `${kpis.mediaHonorarios.toFixed(2)}% — média do período` : 'sem lançamentos no filtro'}
           icon={Percent}
           tone="fees"
           accent
         />
       </section>
 
-      {selectedClientStats && (
+      {tab === 'Open' && (
+        <section style={{
+          background: companyFilter === 'Todas'
+            ? 'rgba(245,158,11,0.06)'
+            : monthFilter === 'Todos'
+              ? 'rgba(96,165,250,0.06)'
+              : 'rgba(16,185,129,0.08)',
+          border: `1px solid ${companyFilter === 'Todas' ? 'rgba(245,158,11,0.2)' : monthFilter === 'Todos' ? 'rgba(96,165,250,0.2)' : 'rgba(16,185,129,0.25)'}`,
+          borderRadius: '12px',
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+        }}>
+          <LockKeyhole size={16} style={{ flexShrink: 0, color: companyFilter === 'Todas' ? '#f59e0b' : monthFilter === 'Todos' ? '#60a5fa' : '#10b981' }} aria-hidden="true" />
+          <div style={{ fontSize: '0.8rem', lineHeight: 1.5, color: '#cbd5e1' }}>
+            {companyFilter === 'Todas' ? (
+              <><strong style={{ color: '#f59e0b' }}>Passo 1 de 2:</strong> Selecione a <strong>empresa</strong> que será fechada dentro do mês.</>
+            ) : monthFilter === 'Todos' ? (
+              <><strong style={{ color: '#60a5fa' }}>Passo 2 de 2:</strong> Selecione o <strong>mês</strong> do fechamento de <strong>{companyFilter}</strong>.</>
+            ) : (
+              <><strong style={{ color: '#10b981' }}>Pronto!</strong> Revisando <strong>{filtered.length} lançamento{filtered.length !== 1 ? 's' : ''}</strong> de <strong>{companyFilter}</strong> dentro de <strong>{monthFilter}</strong>. O histórico será gravado como <strong>mês + empresa</strong>.</>
+            )}
+          </div>
+        </section>
+      )}
+      {selectedCompanyStats && (
         <section className="glass-card analise-client-summary">
           <div className="analise-client-summary-title">
             <Building2 size={16} aria-hidden="true" />
-            <strong>{clientFilter}</strong>
-            <span>{monthFilter === 'Todos' ? '· todos os periodos' : `· ${monthFilter}`}</span>
+            <strong>{companyFilter}</strong>
+            <span>{monthFilter === 'Todos' ? '\u00b7 todos os per\u00edodos' : `\u00b7 ${monthFilter}`}</span>
           </div>
           <div className="analise-client-summary-stats">
-            <span><b>{selectedClientStats.branches}</b> filiais</span>
-            <span><b>{selectedClientStats.operations}</b> lançamentos</span>
-            <span><b>{brl(selectedClientStats.sales)}</b> vendas</span>
-            <span><b>{brl(selectedClientStats.honorarios)}</b> honorários</span>
+            <span><b>{selectedCompanyStats.branches}</b> filiais/propriedades</span>
+            <span><b>{selectedCompanyStats.operations}</b> lançamentos</span>
+            <span><b>{selectedCompanyStats.closedMonths}</b> meses fechados</span>
+            <span><b>{brl(selectedCompanyStats.sales)}</b> vendas</span>
+            <span><b>{brl(selectedCompanyStats.honorarios)}</b> honorários</span>
           </div>
         </section>
       )}
@@ -514,6 +573,24 @@ export default function AnaliseCreditoTable({
           {clients.map((client) => (
             <option key={client} value={client}>
               {client}
+            </option>
+          ))}
+        </select>
+
+        <select value={companyFilter} onChange={(event) => setCompanyFilter(event.target.value)} aria-label="Filtrar empresa">
+          <option value="Todas">Todas as empresas</option>
+          {companies.map((company) => (
+            <option key={company} value={company}>
+              {company}
+            </option>
+          ))}
+        </select>
+
+        <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} aria-label="Filtrar mês">
+          <option value="Todos">Todos os meses</option>
+          {months.map((month) => (
+            <option key={month} value={month}>
+              {month}
             </option>
           ))}
         </select>
@@ -549,9 +626,9 @@ export default function AnaliseCreditoTable({
             Agrupar
           </button>
 
-          <button type="button" disabled={!canClose || isClosing} onClick={closeMonth}>
+          <button type="button" disabled={isClosing} onClick={closeMonth}>
             <LockKeyhole size={17} aria-hidden="true" />
-            {isClosing ? 'Encerrando' : 'Encerrar mes'}
+            {isClosing ? 'Encerrando' : 'Encerrar empresa no mês'}
           </button>
 
           <button type="button" className="primary" onClick={openNewOperation}>
@@ -568,7 +645,7 @@ export default function AnaliseCreditoTable({
             <thead>
               <tr>
                 <th>Data</th>
-                <th>Cliente</th>
+                <th>Empresa / cliente</th>
                 <th>Nota fiscal</th>
                 <th className="text-right">Venda</th>
                 <th className="text-right">ICMS</th>
@@ -596,15 +673,15 @@ export default function AnaliseCreditoTable({
 
               {filtered.length > 0 &&
                 (grouped
-                  ? groups.map(([cliente, data]) => (
-                      <Fragment key={cliente}>
-                        <tr className="analise-group-row" onClick={() => toggleGroup(cliente)}>
+                  ? groups.map(([key, data]) => (
+                      <Fragment key={key}>
+                        <tr className="analise-group-row" onClick={() => toggleGroup(key)}>
                           <td colSpan={3}>
-                            <button type="button" aria-expanded={expanded.has(cliente)}>
+                            <button type="button" aria-expanded={expanded.has(key)}>
                               <ChevronRight size={17} aria-hidden="true" />
                               <span>
-                                <strong>{cliente}</strong>
-                                <small>{data.ops.length} operacao{data.ops.length === 1 ? '' : 'es'}</small>
+                                <strong>{data.label}</strong>
+                                <small>{[data.detail, `${data.ops.length} operação${data.ops.length === 1 ? '' : 'es'}`].filter(Boolean).join(' · ')}</small>
                               </span>
                             </button>
                           </td>
@@ -614,7 +691,7 @@ export default function AnaliseCreditoTable({
                           <td />
                           <td />
                         </tr>
-                        {expanded.has(cliente) && rows(data.ops)}
+                        {expanded.has(key) && rows(data.ops)}
                       </Fragment>
                     ))
                   : rows(filtered))}
@@ -659,6 +736,16 @@ export default function AnaliseCreditoTable({
                   onQueryChange={(value) => setForm((prev) => ({ ...prev, cliente: value, client_id: null, filial_id: null, propriedade: '' }))}
                   initialQuery={form.cliente}
                   placeholder="Buscar cliente cadastrado"
+                />
+              </label>
+              <label>
+                Empresa / razão social
+                <input
+                  required
+                  className={controlClass}
+                  value={form.empresa}
+                  onChange={(event) => setForm((prev) => ({ ...prev, empresa: event.target.value }))}
+                  placeholder="Empresa usada no fechamento mensal"
                 />
               </label>
               <label>

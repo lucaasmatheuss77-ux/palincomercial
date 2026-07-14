@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback, type DragEvent } from 'react'
 import Link from 'next/link'
-import { Brain, CalendarDays, ChevronRight, ExternalLink, FileText, History, Mail, MessageSquare, Mic, Pencil, Phone, PhoneCall, Plus, Search, Sparkles, TimerReset, Trash2, Target, Wand2, X, Loader2, UserSearch } from 'lucide-react'
+import { Brain, CalendarDays, ChevronRight, ExternalLink, FileText, History, Mail, MessageSquare, Mic, Pencil, Phone, PhoneCall, Plus, Search, Sparkles, TimerReset, Trash2, Target, Upload, Wand2, X, Loader2, UserSearch } from 'lucide-react'
 import { toast } from 'sonner'
 import { createMeeting } from '@/app/actions/agenda'
 import { updateLeadStage, createLead, updateLead, deleteLead } from '@/app/actions/pipeline'
@@ -18,6 +18,7 @@ import {
   PIPELINE_ASSISTANT_VERSION,
 } from '@/lib/pipeline-assistant'
 import { triggerSingleBoom, triggerSaleConfetti } from '@/lib/effects'
+import { formatCnpj } from '@/lib/formatters'
 import type {
   PipelineAssistantAppliedFilter,
   PipelineAssistantActionResponse,
@@ -194,6 +195,7 @@ type PipelineBoardProps = {
 
 
 const emptyDraft = {
+  client_id: '',
   name: '',
   company: '',
   product_id: '',
@@ -238,17 +240,6 @@ function addMinutesToDateTimeLocal(value: string, minutes: number) {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
-
-function maskCnpj(value: string) {
-  const cleanValue = value.replace(/\D/g, '')
-  return cleanValue
-    .replace(/^(\d{2})(\d)/, '$1.$2')
-    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
-    .replace(/\.(\d{3})(\d)/, '.$1/$2')
-    .replace(/(\d{4})(\d)/, '$1-$2')
-    .slice(0, 18)
-}
-
 
 function getLeadTemperature(lead: LeadType) {
   if (lead.stage === 'Proposta' || lead.stage === 'Fechado') {
@@ -315,10 +306,6 @@ function getStalledDays(timeline: { meetings: LeadMeetingTimeline[]; activities:
 function getDaysSinceContact(lead: LeadType, timeline?: { meetings: LeadMeetingTimeline[]; activities: LeadActivityTimeline[] }): number {
   const stalledDays = getStalledDays(timeline)
   if (stalledDays !== null) return stalledDays;
-  
-  if (!(lead as any).last_contact_at && stalledDays === null) {
-    return 999;
-  }
   
   const candidates: number[] = [];
   if ((lead as any).last_contact_at) candidates.push(new Date((lead as any).last_contact_at).getTime());
@@ -659,6 +646,8 @@ export default function PipelineBoard({
     requires_logistics: false,
   })
   const [showMeetingFollowUp, setShowMeetingFollowUp] = useState(false)
+  const [meetingPautaLoading, setMeetingPautaLoading] = useState(false)
+  const [meetingAudioUploading, setMeetingAudioUploading] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [assistantDraft, setAssistantDraft] = useState('Quais leads devo atacar hoje?')
   const [assistantQuestion, setAssistantQuestion] = useState('Quais leads devo atacar hoje?')
@@ -1049,6 +1038,52 @@ export default function PipelineBoard({
     setSelectedLeadId(null)
   }
 
+  async function handleGenerateMeetingPauta() {
+    const lead = leads.find((item) => item.id === meetingDraft.lead_id)
+    setMeetingPautaLoading(true)
+    try {
+      const response = await fetch('/api/assistant/pauta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientName: lead?.name || meetingDraft.title || 'Lead', recordingLink: '', additionalContext: meetingDraft.title || '' }),
+      })
+      const data = await response.json() as { pauta?: string; error?: string }
+      if (!response.ok || data.error) { toast.error(data.error || 'Erro ao gerar pauta.'); return }
+      setMeetingDraft((current) => ({ ...current, objective: data.pauta || current.objective }))
+      toast.success('Pauta gerada pela IA. Revise antes de salvar.')
+    } catch {
+      toast.error('Falha ao conectar com a IA.')
+    } finally {
+      setMeetingPautaLoading(false)
+    }
+  }
+
+  async function handleUploadMeetingRecording(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setMeetingAudioUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('audio', file)
+      formData.append('lead_id', meetingDraft.lead_id || '')
+      const response = await fetch('/api/meetings/transcribe', { method: 'POST', body: formData })
+      const data = await response.json() as { transcription?: string; summary?: string; action_items?: string[]; error?: string }
+      if (!response.ok || data.error) { toast.error(data.error || 'Erro ao transcrever a gravação.'); return }
+      setMeetingDraft((current) => ({
+        ...current,
+        notes: data.summary ? (current.notes ? `${current.notes}\n\nResumo IA:\n${data.summary}` : `Resumo IA:\n${data.summary}`) : current.notes,
+        next_step: data.action_items && data.action_items.length > 0 ? data.action_items.join('\n') : current.next_step,
+      }))
+      setShowMeetingFollowUp(true)
+      toast.success('Gravação transcrita e resumida pela IA!')
+    } catch {
+      toast.error('Falha ao enviar o arquivo.')
+    } finally {
+      setMeetingAudioUploading(false)
+      event.target.value = ''
+    }
+  }
+
   async function handleCreateLeadMeeting() {
     const lead = leads.find((item) => item.id === meetingDraft.lead_id)
     if (!lead) {
@@ -1163,8 +1198,10 @@ export default function PipelineBoard({
   }
 
   function openEditLead(lead: LeadType) {
+    const linkedClient = lead.client_id ? clientes.find((cliente) => cliente.id === lead.client_id) : null
+    const leadCnpj = formatCnpj(lead.cnpj || linkedClient?.documento || '')
     setEditingLead(lead)
-    setShowAdvancedFields(false)
+    setShowAdvancedFields(Boolean(leadCnpj || lead.regime_tributario || lead.faturamento_estimado || lead.segmento_especifico))
     setDraftLead({
       name: lead.name,
       company: lead.company,
@@ -1174,7 +1211,8 @@ export default function PipelineBoard({
       phone: lead.phone,
       whatsapp: lead.whatsapp,
       email: lead.email,
-      cnpj: (lead as LeadType & { cnpj?: string }).cnpj ?? '',
+      cnpj: leadCnpj,
+      client_id: lead.client_id || '',
       regime_tributario: (lead as LeadType & { regime_tributario?: string }).regime_tributario ?? '',
       next_contact_at: '',
       faturamento_estimado: (lead as LeadType & { faturamento_estimado?: number }).faturamento_estimado != null
@@ -1210,7 +1248,8 @@ export default function PipelineBoard({
       ai_score: Number(draftLead.ai_score) || 0,
       ai_source: draftLead.ai_source.trim(),
       ai_summary: draftLead.ai_summary.trim(),
-      cnpj: draftLead.cnpj.trim(),
+      cnpj: formatCnpj(draftLead.cnpj),
+      client_id: draftLead.client_id || null,
       regime_tributario: draftLead.regime_tributario,
       faturamento_estimado: Number(draftLead.faturamento_estimado) || 0,
       segmento_especifico: draftLead.segmento_especifico.trim(),
@@ -1238,6 +1277,11 @@ export default function PipelineBoard({
       phone: draftLead.phone.trim(),
       whatsapp: draftLead.whatsapp.trim(),
       email: draftLead.email.trim(),
+      cnpj: formatCnpj(draftLead.cnpj),
+      client_id: result.lead?.client_id || draftLead.client_id || undefined,
+      regime_tributario: draftLead.regime_tributario,
+      faturamento_estimado: Number(draftLead.faturamento_estimado) || null,
+      segmento_especifico: draftLead.segmento_especifico.trim(),
       ai_status: draftLead.ai_status,
       ai_score: Number(draftLead.ai_score) || 0,
       ai_source: draftLead.ai_source.trim(),
@@ -1267,7 +1311,7 @@ export default function PipelineBoard({
       ai_score: Number(draftLead.ai_score) || 0,
       ai_source: draftLead.ai_source.trim(),
       ai_summary: draftLead.ai_summary.trim(),
-      cnpj: draftLead.cnpj.trim(),
+      cnpj: formatCnpj(draftLead.cnpj),
       regime_tributario: draftLead.regime_tributario,
       faturamento_estimado: Number(draftLead.faturamento_estimado) || 0,
       segmento_especifico: draftLead.segmento_especifico.trim(),
@@ -1302,6 +1346,10 @@ export default function PipelineBoard({
               phone: draftLead.phone.trim(),
               whatsapp: draftLead.whatsapp.trim(),
               email: draftLead.email.trim(),
+              cnpj: formatCnpj(draftLead.cnpj),
+              regime_tributario: draftLead.regime_tributario,
+              faturamento_estimado: Number(draftLead.faturamento_estimado) || null,
+              segmento_especifico: draftLead.segmento_especifico.trim(),
               ai_status: draftLead.ai_status,
               ai_score: Number(draftLead.ai_score) || 0,
               ai_source: draftLead.ai_source.trim(),
@@ -1370,7 +1418,8 @@ export default function PipelineBoard({
   const isContatoInicial = !draftLead.stage || draftLead.stage === 'Contato Inicial'
 
   // CNPJ: se o lead já tem client_id, usa o documento do cliente (auto-preenchido)
-  const clientCnpj = editingLead?.cnpj ?? ''
+  const linkedEditingClient = editingLead?.client_id ? clientes.find((cliente) => cliente.id === editingLead.client_id) : null
+  const clientCnpj = formatCnpj(editingLead?.cnpj || linkedEditingClient?.documento || '')
 
   const leadFormFields = (
     <div style={{ display: 'grid', gap: '12px' }}>
@@ -1387,7 +1436,8 @@ export default function PipelineBoard({
               company: cliente.company_name || c.company,
               email: cliente.email || c.email,
               phone: cliente.phone || c.phone,
-              cnpj: cliente.documento || c.cnpj,
+              client_id: cliente.id,
+              cnpj: formatCnpj(cliente.documento || c.cnpj),
             }))}
             onClear={() => {}}
             placeholder="Buscar cliente cadastrado para preencher automaticamente"
@@ -1513,8 +1563,8 @@ export default function PipelineBoard({
                 <input
                   className="input-field"
                   placeholder="CNPJ"
-                  value={draftLead.cnpj || clientCnpj}
-                  onChange={(e) => setDraftLead((c) => ({ ...c, cnpj: maskCnpj(e.target.value) }))}
+                  value={formatCnpj(draftLead.cnpj || clientCnpj)}
+                  onChange={(e) => setDraftLead((c) => ({ ...c, cnpj: formatCnpj(e.target.value) }))}
                 />
                 {clientCnpj && !draftLead.cnpj && (
                   <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.6rem', color: '#86efac', fontWeight: 800 }}>✓ CLIENTE</span>
@@ -1568,7 +1618,6 @@ export default function PipelineBoard({
               setIsVoiceRecording(false)
               const mockTranscription = '\n[CAMPO]: Cliente demonstrou interesse. Registrar próxima ação.'
               setDraftLead((prev) => ({ ...prev, ai_summary: (prev.ai_summary || '') + mockTranscription }))
-              triggerSingleBoom()
             } else {
               setIsVoiceRecording(true)
             }
@@ -1974,8 +2023,8 @@ export default function PipelineBoard({
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
                         {isAssistantRecommended ? (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(251,191,36,0.12)', color: 'var(--brand-primary)', fontSize: '0.64rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                            <Sparkles size={11} />
-                            IA #{assistantRanking?.rank}
+                            <Target size={11} />
+                            Prioridade #{assistantRanking?.rank}
                           </div>
                         ) : null}
                         {isOverdue && (
@@ -2133,6 +2182,7 @@ export default function PipelineBoard({
                           }
 
                           const planData = urgentActionPlans[lead.id]
+                          const hasRealAiPlan = Boolean(planData && ((Array.isArray(planData.acoes_recomendadas) && planData.acoes_recomendadas.length > 0) || planData.alerta_vermelho))
                           let aiActionPlan = getPalinIAPrioritizedPlan(lead);
                           if (planData && Array.isArray(planData.acoes_recomendadas) && planData.acoes_recomendadas.length > 0) {
                             aiActionPlan = planData.acoes_recomendadas[0]; // Show the top priority action
@@ -2144,8 +2194,8 @@ export default function PipelineBoard({
                           return (
                             <div style={{ padding: '12px', borderRadius: '10px', background: isUrgent ? 'rgba(239, 68, 68, 0.1)' : 'rgba(251,191,36,0.1)', border: isUrgent ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(251,191,36,0.3)', position: 'relative' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.65rem', color: isUrgent ? '#fca5a5' : '#fbbf24', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>
-                                <Sparkles size={12} color={isUrgent ? '#f87171' : '#fbbf24'} />
-                                Palin IA: Ação Sugerida
+                                {hasRealAiPlan ? <Sparkles size={12} color={isUrgent ? '#f87171' : '#fbbf24'} /> : <Target size={12} color={isUrgent ? '#f87171' : '#fbbf24'} />}
+                                {hasRealAiPlan ? 'Palin IA: Ação Sugerida' : 'Próximo passo sugerido'}
                               </div>
                               <div style={{ color: '#f8fafc', fontSize: '0.8rem', fontWeight: 700, lineHeight: 1.45 }}>
                                 {aiActionPlan}
@@ -2431,7 +2481,7 @@ export default function PipelineBoard({
                 }}
               >
                 <MessageSquare size={14} style={{ color: '#10b981' }} />
-                Sugestão IA
+                Roteiro Sugerido
               </button>
               <button
                 type="button"
@@ -2479,12 +2529,6 @@ export default function PipelineBoard({
                       {selectedLeadTimeline?.activities?.[0]?.next_step || getLeadNextAction(selectedLead)}
                     </div>
                   </div>
-                  <div style={{ padding: '14px', borderRadius: '14px', background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.12)' }}>
-                    <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#60a5fa', fontWeight: 800 }}>Faturamento Est.</div>
-                    <div style={{ marginTop: '8px', fontSize: '1.1rem', fontWeight: 900, color: '#f8fafc' }}>
-                      {formatCompactCurrency((selectedLead as LeadType & { faturamento_estimado?: number }).faturamento_estimado || selectedLead.value)}
-                    </div>
-                  </div>
                 </div>
 
                 <div style={{ 
@@ -2499,7 +2543,7 @@ export default function PipelineBoard({
                 }}>
                   <div>
                     <div style={{ fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 800 }}>CNPJ</div>
-                    <div style={{ color: '#e2e8f0', fontSize: '0.9rem', fontWeight: 600, marginTop: '4px' }}>{selectedLead.cnpj || 'Não informado'}</div>
+                    <div style={{ color: '#e2e8f0', fontSize: '0.9rem', fontWeight: 600, marginTop: '4px' }}>{formatCnpj(selectedLead.cnpj) || 'N\u00e3o informado'}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 800 }}>Regime Tributário</div>
@@ -2515,7 +2559,7 @@ export default function PipelineBoard({
               <div style={{ display: 'grid', gap: '16px' }}>
                 <div style={{ padding: '16px', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.15)', borderRadius: '16px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                    <Sparkles size={18} style={{ color: '#10b981' }} />
+                    <MessageSquare size={18} style={{ color: '#10b981' }} />
                     <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#10b981', textTransform: 'uppercase' }}>Script de Vendas Personalizado</span>
                   </div>
                   {followUpLoading ? (
@@ -2900,8 +2944,19 @@ export default function PipelineBoard({
             </label>
           </div>
 
-          <label style={{ display: 'grid', gap: '6px' }}>
-            <span className="meeting-section-label" style={{ color: 'var(--brand-primary)' }}>Pauta da reunião</span>
+          <div style={{ display: 'grid', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span className="meeting-section-label" style={{ color: 'var(--brand-primary)' }}>Pauta da reunião</span>
+              <button
+                type="button"
+                onClick={() => void handleGenerateMeetingPauta()}
+                disabled={meetingPautaLoading}
+                className="meeting-chip"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                {meetingPautaLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Gerar com IA
+              </button>
+            </div>
             <textarea
               className="input-field"
               rows={3}
@@ -2909,7 +2964,7 @@ export default function PipelineBoard({
               value={meetingDraft.objective}
               onChange={(event) => setMeetingDraft((current) => ({ ...current, objective: event.target.value }))}
             />
-          </label>
+          </div>
 
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px' }}>
             <button
@@ -2938,6 +2993,17 @@ export default function PipelineBoard({
                 <p style={{ color: '#64748b', fontSize: '0.76rem', lineHeight: 1.5, margin: 0 }}>
                   Preencha estes campos depois que a reunião acontecer, ou deixe em branco por enquanto.
                 </p>
+                <label
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '8px', cursor: meetingAudioUploading ? 'wait' : 'pointer',
+                    color: '#93c5fd', fontSize: '0.78rem', fontWeight: 700, background: 'rgba(96,165,250,0.08)',
+                    border: '1px solid rgba(96,165,250,0.2)', padding: '10px 14px', borderRadius: '10px', width: 'fit-content',
+                  }}
+                >
+                  {meetingAudioUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  Enviar áudio ou vídeo da reunião (a IA resume)
+                  <input type="file" accept="audio/*,video/*" onChange={(event) => void handleUploadMeetingRecording(event)} disabled={meetingAudioUploading} style={{ display: 'none' }} />
+                </label>
                 <label style={{ display: 'grid', gap: '6px' }}>
                   <span className="meeting-field-label">O que foi falado</span>
                   <textarea
@@ -3001,14 +3067,14 @@ export default function PipelineBoard({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
                 <div style={{ display: 'grid', gap: '4px' }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: 'var(--brand-primary)', fontSize: '0.72rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                    <Sparkles size={14} />
-                    Assistente CRM
+                    <Target size={14} />
+                    Priorização de Leads
                   </div>
                   <div style={{ color: '#f8fafc', fontSize: '1.05rem', fontWeight: 900, lineHeight: 1.3 }}>
-                    Pergunte sobre seus leads.
+                    Filtre e priorize seus leads.
                   </div>
                   <div style={{ color: '#94a3b8', fontSize: '0.78rem', lineHeight: 1.45 }}>
-                    Analise e priorização baseada em etapa, valor, aging e IA.
+                    Análise e priorização baseada em etapa, valor e aging.
                   </div>
                 </div>
 
