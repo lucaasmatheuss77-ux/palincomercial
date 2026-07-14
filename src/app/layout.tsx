@@ -37,7 +37,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
-      <head />
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#111827" />
+        <link rel="apple-touch-icon" href="/icon-192x192.png" />
+      </head>
 
       <body className={`${inter.className} ${inter.variable} ${firaCode.variable} ${spaceGrotesk.variable}`} suppressHydrationWarning>
         <ThemeProvider>

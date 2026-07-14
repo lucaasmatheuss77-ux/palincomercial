@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { listClienteOptions } from '@/app/actions/clientes'
-import MobileHubClient from '../dashboard/mobile-crm/mobile-client'
+import MobileHubClient from './mobile-client'
 
 export const dynamic = 'force-dynamic'
 
