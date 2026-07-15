@@ -29,7 +29,7 @@ export default async function PocketCRMPage({ searchParams }: { searchParams?: M
   const [leadsRes, agendaRes, meetingsTodayRes, overdueRes, profileRes] = await Promise.allSettled([
     supabase
       .from('leads')
-      .select('id, name, stage, whatsapp, expected_value, created_at, segmento_especifico, company:company_name')
+      .select('id, name, stage, whatsapp, expected_value, created_at, segmento_especifico, client_id, company:company_name')
       .order('updated_at', { ascending: false })
       .limit(10000),
 

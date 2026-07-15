@@ -1067,12 +1067,28 @@ export default function PipelineBoard({
       formData.append('audio', file)
       formData.append('lead_id', meetingDraft.lead_id || '')
       const response = await fetch('/api/meetings/transcribe', { method: 'POST', body: formData })
-      const data = await response.json() as { transcription?: string; summary?: string; action_items?: string[]; error?: string }
+      const data = await response.json() as {
+        transcription?: string
+        transcript?: string
+        text?: string
+        pauta?: string
+        summary?: string
+        action_items?: string[] | string
+        next_steps?: string[] | string
+        next_step?: string
+        error?: string
+      }
       if (!response.ok || data.error) { toast.error(data.error || 'Erro ao transcrever a gravação.'); return }
+      const actionItems = Array.isArray(data.action_items) ? data.action_items : data.action_items ? [data.action_items] : []
+      const nextSteps = Array.isArray(data.next_steps) ? data.next_steps : data.next_steps ? [data.next_steps] : []
+      const normalizedAgenda = data.pauta || data.transcription || data.transcript || data.text || ''
+      const normalizedNextSteps = data.next_step || [...actionItems, ...nextSteps].filter(Boolean).join('\n')
+
       setMeetingDraft((current) => ({
         ...current,
-        notes: data.summary ? (current.notes ? `${current.notes}\n\nResumo IA:\n${data.summary}` : `Resumo IA:\n${data.summary}`) : current.notes,
-        next_step: data.action_items && data.action_items.length > 0 ? data.action_items.join('\n') : current.next_step,
+        objective: current.objective || normalizedAgenda,
+        notes: data.summary ? (current.notes ? `${current.notes}\n\nResumo da conversa:\n${data.summary}` : `Resumo da conversa:\n${data.summary}`) : current.notes,
+        next_step: normalizedNextSteps || current.next_step,
       }))
       setShowMeetingFollowUp(true)
       toast.success('Gravação transcrita e resumida pela IA!')
@@ -3005,7 +3021,7 @@ export default function PipelineBoard({
                   <input type="file" accept="audio/*,video/*" onChange={(event) => void handleUploadMeetingRecording(event)} disabled={meetingAudioUploading} style={{ display: 'none' }} />
                 </label>
                 <label style={{ display: 'grid', gap: '6px' }}>
-                  <span className="meeting-field-label">O que foi falado</span>
+                  <span className="meeting-field-label">Resumo da conversa</span>
                   <textarea
                     className="input-field"
                     rows={3}
@@ -3427,7 +3443,7 @@ export default function PipelineBoard({
               />
               <label style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700 }}>Observacoes</label>
               <textarea
-                rows={2} placeholder="Resumo..."
+                rows={2} placeholder="Resumo da conversa e proximos passos da ligacao"
                 value={callForm.notes}
                 onChange={(e) => setCallForm((f) => ({ ...f, notes: e.target.value }))}
                 style={{ background: '#0d1117', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '8px 10px', fontSize: '0.82rem', resize: 'vertical' }}

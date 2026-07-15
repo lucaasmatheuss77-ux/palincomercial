@@ -41,6 +41,31 @@ function formatDate(value: string | null) {
   if (Number.isNaN(parsed.getTime())) return 'Data invalida'
   return parsed.toLocaleDateString('pt-BR')
 }
+
+type AudioTranscriptionResponse = {
+  transcription?: string
+  transcript?: string
+  text?: string
+  pauta?: string
+  summary?: string
+  action_items?: string[] | string
+  next_steps?: string[] | string
+  next_step?: string
+  recording_link?: string
+  error?: string
+}
+
+function normalizeAudioTranscription(data: AudioTranscriptionResponse) {
+  const actionItems = Array.isArray(data.action_items) ? data.action_items : data.action_items ? [data.action_items] : []
+  const nextSteps = Array.isArray(data.next_steps) ? data.next_steps : data.next_steps ? [data.next_steps] : []
+  return {
+    agenda: data.pauta || data.transcription || data.transcript || data.text || '',
+    summary: data.summary || '',
+    nextSteps: data.next_step || [...actionItems, ...nextSteps].filter(Boolean).join('\n'),
+    recordingLink: data.recording_link || '',
+  }
+}
+
 function formatAge(value: string | null) {
   if (!value) return 'Sem data'
   const parsed = new Date(value)
@@ -335,12 +360,18 @@ export function ClientDetailsPanel({ selectedRow, onClose }: { selectedRow: Clie
       formData.append('audio', file)
       formData.append('client_id', selectedRow?.clientRecordId || '')
       const response = await fetch('/api/meetings/transcribe', { method: 'POST', body: formData })
-      const data = await response.json() as { transcription?: string; summary?: string; action_items?: string[]; error?: string }
+      const data = await response.json() as AudioTranscriptionResponse
       if (!response.ok || data.error) { toast.error(data.error || 'Erro ao transcrever áudio.'); return }
+      const normalized = normalizeAudioTranscription(data)
       setMeetingForm((current) => ({
         ...current,
-        pauta: data.transcription || current.pauta,
-        notes: data.summary ? (current.notes ? current.notes + '\n\nResumo IA:\n' + data.summary : 'Resumo IA:\n' + data.summary) : current.notes,
+        pauta: normalized.agenda || current.pauta,
+        notes: [
+          current.notes,
+          normalized.summary ? `Resumo da conversa:\n${normalized.summary}` : '',
+          normalized.nextSteps ? `Proximos passos:\n${normalized.nextSteps}` : '',
+        ].filter(Boolean).join('\n\n'),
+        recording_link: normalized.recordingLink || current.recording_link,
       }))
       toast.success('Áudio transcrito e resumido pela IA!')
     } catch { toast.error('Falha ao enviar áudio.') } finally { setAudioUploading(false) }

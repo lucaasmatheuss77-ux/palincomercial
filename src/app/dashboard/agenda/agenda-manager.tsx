@@ -290,12 +290,28 @@ export default function AgendaManager({
       formData.append('audio', file)
       formData.append('client_id', meetingForm.client_id || '')
       const response = await fetch('/api/meetings/transcribe', { method: 'POST', body: formData })
-      const data = await response.json() as { transcription?: string; summary?: string; action_items?: string[]; error?: string }
+      const data = await response.json() as {
+        transcription?: string
+        transcript?: string
+        text?: string
+        pauta?: string
+        summary?: string
+        action_items?: string[] | string
+        next_steps?: string[] | string
+        next_step?: string
+        error?: string
+      }
       if (!response.ok || data.error) { toast.error(data.error || 'Erro ao transcrever a gravação.'); return }
+      const actionItems = Array.isArray(data.action_items) ? data.action_items : data.action_items ? [data.action_items] : []
+      const nextSteps = Array.isArray(data.next_steps) ? data.next_steps : data.next_steps ? [data.next_steps] : []
+      const normalizedAgenda = data.pauta || data.transcription || data.transcript || data.text || ''
+      const normalizedNextSteps = data.next_step || [...actionItems, ...nextSteps].filter(Boolean).join('\n')
+
       setMeetingForm((current) => ({
         ...current,
-        notes: data.summary ? (current.notes ? `${current.notes}\n\nResumo IA:\n${data.summary}` : `Resumo IA:\n${data.summary}`) : current.notes,
-        next_step: data.action_items && data.action_items.length > 0 ? data.action_items.join('\n') : current.next_step,
+        objective: current.objective || normalizedAgenda,
+        notes: data.summary ? (current.notes ? `${current.notes}\n\nResumo da conversa:\n${data.summary}` : `Resumo da conversa:\n${data.summary}`) : current.notes,
+        next_step: normalizedNextSteps || current.next_step,
       }))
       setShowMeetingFollowUp(true)
       toast.success('Gravação transcrita e resumida pela IA!')
@@ -978,7 +994,7 @@ export default function AgendaManager({
                   <input type="file" accept="audio/*,video/*" onChange={(event) => void handleUploadMeetingRecording(event)} disabled={meetingAudioUploading} style={{ display: 'none' }} />
                 </label>
                 <label style={{ display: 'grid', gap: '6px' }}>
-                  <span className="meeting-field-label">O que foi falado</span>
+                  <span className="meeting-field-label">Resumo da conversa</span>
                   <textarea className="input-field" rows={3} placeholder="Resumo da conversa" value={meetingForm.notes} onChange={e => setMeetingForm(c => ({ ...c, notes: e.target.value }))} />
                 </label>
                 <label style={{ display: 'grid', gap: '6px' }}>

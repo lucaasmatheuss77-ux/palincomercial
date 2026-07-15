@@ -540,17 +540,37 @@ export default function ClientesClient({
         body: formData,
       })
 
-      const data = await response.json() as { transcript?: string; pauta?: string; summary?: string; recording_link?: string; error?: string }
+      const data = await response.json() as {
+        transcription?: string
+        transcript?: string
+        text?: string
+        pauta?: string
+        summary?: string
+        action_items?: string[] | string
+        next_steps?: string[] | string
+        next_step?: string
+        recording_link?: string
+        error?: string
+      }
       
       if (!response.ok || data.error) {
         toast.error(data.error || 'Erro ao transcrever áudio.')
         return
       }
 
+      const actionItems = Array.isArray(data.action_items) ? data.action_items : data.action_items ? [data.action_items] : []
+      const nextSteps = Array.isArray(data.next_steps) ? data.next_steps : data.next_steps ? [data.next_steps] : []
+      const normalizedAgenda = data.pauta || data.transcription || data.transcript || data.text || ''
+      const normalizedNextSteps = data.next_step || [...actionItems, ...nextSteps].filter(Boolean).join('\n')
+
       setMeetingForm((current) => ({
         ...current,
-        pauta: data.pauta || data.transcript || current.pauta,
-        notes: data.summary ? (current.notes ? current.notes + '\\n\\nResumo IA:\\n' + data.summary : 'Resumo IA:\\n' + data.summary) : current.notes,
+        pauta: normalizedAgenda || current.pauta,
+        notes: [
+          current.notes,
+          data.summary ? `Resumo da conversa:\n${data.summary}` : '',
+          normalizedNextSteps ? `Proximos passos:\n${normalizedNextSteps}` : '',
+        ].filter(Boolean).join('\n\n'),
         recording_link: data.recording_link || current.recording_link,
       }))
 
@@ -1387,7 +1407,7 @@ export default function ClientesClient({
                       <textarea
                         className="input-field"
                         rows={2}
-                        placeholder="Resumo da conversa..."
+                        placeholder="Resumo da conversa e proximos passos da ligacao"
                         value={callForm.notes}
                         onChange={(e) => setCallForm((f) => ({ ...f, notes: e.target.value }))}
                         style={{ resize: 'vertical' }}
@@ -1764,7 +1784,7 @@ export default function ClientesClient({
                     </div>
                     <div style={{ display: 'grid', gap: '6px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: '#94a3b8', fontSize: '0.74rem', fontWeight: 700 }}>Pauta</span>
+                        <span style={{ color: '#94a3b8', fontSize: '0.74rem', fontWeight: 700 }}>Pauta da reuniao</span>
                         <button
                           type="button"
                           className="btn-ghost"
@@ -1787,7 +1807,7 @@ export default function ClientesClient({
                     </div>
                     <textarea
                       className="input-field"
-                      placeholder="Notas adicionais (opcional)"
+                      placeholder="Resumo da conversa e proximos passos (opcional)"
                       value={meetingForm.notes}
                       rows={2}
                       onChange={(e) => setMeetingForm((f) => ({ ...f, notes: e.target.value }))}

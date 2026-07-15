@@ -2,31 +2,83 @@ import { NextRequest, NextResponse } from 'next/server'
 import { generateObject } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { recordCommercialActivity } from '@/app/actions/commercial-activities'
+
+export const maxDuration = 60
+
+const SUPPORTED_AUDIO_TYPES: Record<string, string> = {
+  'audio/webm': 'webm',
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/mp4': 'mp4',
+  'audio/x-m4a': 'm4a',
+  'audio/m4a': 'm4a',
+  'audio/aac': 'aac',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
+}
+
+function firstText(formData: FormData, names: string[]) {
+  for (const name of names) {
+    const value = formData.get(name)
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function normalizedUploadFilename(file: File, fallback = 'meeting-audio.webm') {
+  const currentName = file.name || fallback
+  const currentExtension = currentName.includes('.') ? currentName.split('.').pop()?.toLowerCase() : null
+  const mimeBase = (file.type || '').split(';')[0].toLowerCase()
+  const inferredExtension = SUPPORTED_AUDIO_TYPES[mimeBase]
+
+  if (currentExtension && Object.values(SUPPORTED_AUDIO_TYPES).includes(currentExtension)) {
+    return currentName
+  }
+
+  return `meeting-audio.${inferredExtension || 'webm'}`
+}
+
+function normalizeActivityType(value: string | null) {
+  if (value === 'call' || value === 'ligacao') return 'ligacao'
+  if (value === 'note' || value === 'nota' || value === 'nota_audio') return 'nota_audio'
+  return 'reuniao'
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData()
-    const file = formData.get('audio') as File | null
-    const clientId = formData.get('client_id') as string | null
-    const leadId = formData.get('lead_id') as string | null
-    const dealId = formData.get('deal_id') as string | null
-    const meetingId = formData.get('meeting_id') as string | null
+    let formData: FormData
+    try {
+      formData = await req.formData()
+    } catch {
+      return NextResponse.json({ error: 'Envie o audio usando multipart/form-data.' }, { status: 400 })
+    }
+    const fileEntry = formData.get('audio') || formData.get('file') || formData.get('recording')
+    const file = fileEntry instanceof File ? fileEntry : null
+    const clientId = firstText(formData, ['client_id', 'clientId'])
+    const leadId = firstText(formData, ['lead_id', 'leadId'])
+    const dealId = firstText(formData, ['deal_id', 'dealId'])
+    const meetingId = firstText(formData, ['meeting_id', 'meetingId'])
+    const activityType = normalizeActivityType(firstText(formData, ['activity_type', 'activityType', 'type']))
 
-    if (!file) {
-      return NextResponse.json({ error: 'Nenhum arquivo de áudio enviado.' }, { status: 400 })
+    if (!file || file.size === 0) {
+      return NextResponse.json({ error: 'Nenhum arquivo de audio enviado.' }, { status: 400 })
     }
 
     const openAiApiKey = process.env.OPENAI_API_KEY
     if (!openAiApiKey) {
-      return NextResponse.json({ error: 'OpenAI API Key não configurada.' }, { status: 500 })
+      return NextResponse.json({ error: 'OpenAI API Key nao configurada.' }, { status: 500 })
     }
 
-    // 1. Transcribe audio using Whisper
     const whisperFormData = new FormData()
-    whisperFormData.append('file', file)
+    whisperFormData.append('file', file, normalizedUploadFilename(file))
     whisperFormData.append('model', 'whisper-1')
-    whisperFormData.append('language', 'pt') // assuming Portuguese
+    whisperFormData.append('language', 'pt')
+    whisperFormData.append('response_format', 'json')
 
     const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
@@ -38,70 +90,87 @@ export async function POST(req: NextRequest) {
 
     if (!whisperResponse.ok) {
       const errorText = await whisperResponse.text()
-      console.error('Whisper API error:', errorText)
-      return NextResponse.json({ error: 'Erro ao transcrever o áudio.' }, { status: 500 })
+      console.error('[meetings/transcribe] Whisper API error:', errorText)
+      return NextResponse.json({ error: 'Erro ao transcrever o audio.', details: errorText }, { status: 502 })
     }
 
-    const whisperData = await whisperResponse.json()
-    const transcription = whisperData.text
+    const whisperData = await whisperResponse.json() as { text?: string }
+    const transcription = whisperData.text?.trim() || ''
 
     if (!transcription) {
-      return NextResponse.json({ error: 'Transcrição vazia.' }, { status: 500 })
+      return NextResponse.json({ error: 'Transcricao vazia. Nenhuma fala detectada.' }, { status: 422 })
     }
 
-    // 2. Extract summary and action items using LLM
     const { object } = await generateObject({
       model: openai('gpt-4o-mini'),
-      system: `Você é um assistente especialista em analisar transcrições de reuniões comerciais. 
-Sua tarefa é extrair duas informações principais:
-1. Um resumo (Ata da reunião) contendo os pontos principais discutidos.
-2. Pautas importantes (Action items), ou seja, os próximos passos ou compromissos firmados.`,
-      prompt: `Analise a seguinte transcrição de reunião e extraia o resumo e as pautas importantes:\n\n${transcription}`,
+      system: `Voce e um assistente especialista em analisar transcricoes comerciais em portugues.
+Extraia campos claros para historico de CRM:
+1. agenda: pauta da reuniao ou pauta da ligacao.
+2. summary: resumo da conversa.
+3. action_items: proximos passos e responsaveis quando houver.`,
+      prompt: `Analise a seguinte transcricao comercial e extraia pauta, resumo e proximos passos:\n\n${transcription}`,
       schema: z.object({
-        summary: z.string().describe('O resumo completo da reunião (Ata).'),
-        action_items: z.array(z.string()).describe('Lista de pautas importantes ou próximos passos.'),
+        agenda: z.string().nullable().describe('Pauta da reuniao ou pauta da ligacao.'),
+        summary: z.string().describe('Resumo objetivo da conversa.'),
+        action_items: z.array(z.string()).describe('Lista de proximos passos.'),
       }),
     })
 
-    // 3. Save to database
-    const supabase = await createClient()
-    const { data: userData } = await supabase.auth.getUser()
-    const createdBy = userData?.user?.id
-
     const nextStepString = object.action_items.length > 0 ? object.action_items.join('\n') : null
+    let saved = false
+    let status: 'saved' | 'not_saved_missing_relation' | 'not_saved_error' = 'not_saved_missing_relation'
+    let activity = null
+    let activityId: string | null = null
 
-    const { data: activityData, error: dbError } = await supabase
-      .from('commercial_activities')
-      .insert({
-        client_id: clientId || null,
-        lead_id: leadId || null,
-        deal_id: dealId || null,
-        meeting_id: meetingId || null,
-        activity_type: 'reuniao', // Assumed type
-        subject: 'Reunião Gravada (Transcrita pela IA)',
-        summary: `${object.summary}\n\nTranscrição Original:\n${transcription}`,
-        next_step: nextStepString,
-        status: 'realizada',
-        created_by: createdBy || null,
+    if (clientId || leadId || dealId || meetingId) {
+      const subject = activityType === 'ligacao'
+        ? 'Ligacao gravada transcrita pela IA'
+        : activityType === 'nota_audio'
+          ? 'Nota de audio transcrita pela IA'
+          : 'Reuniao gravada transcrita pela IA'
+
+      const activityResult = await recordCommercialActivity({
+        clientId,
+        leadId,
+        dealId,
+        meetingId,
+        activityType,
+        subject,
+        agenda: object.agenda || null,
+        summary: `${object.summary}\n\nTranscricao original:\n${transcription}`,
+        nextStep: nextStepString,
+        status: activityType === 'reuniao' ? 'realizada' : 'registrada',
       })
-      .select()
-      .single()
 
-    if (dbError) {
-      console.error('Database insertion error:', dbError)
-      return NextResponse.json({ error: 'Erro ao salvar no banco de dados.', details: dbError.message }, { status: 500 })
+      if (!activityResult.success) {
+        console.error('[meetings/transcribe] Database insertion error:', activityResult.error)
+        status = 'not_saved_error'
+      } else {
+        saved = Boolean(activityResult.data?.id)
+        activity = activityResult.data || null
+        activityId = activityResult.data?.id || null
+        status = saved ? 'saved' : 'not_saved_error'
+      }
     }
 
     return NextResponse.json({
       success: true,
       transcription,
+      text: transcription,
+      pauta: object.agenda || null,
+      agenda: object.agenda || null,
       summary: object.summary,
+      nextSteps: object.action_items,
       action_items: object.action_items,
-      activity: activityData,
+      suggestedActivityType: activityType,
+      saved,
+      status,
+      activityId,
+      activity,
     })
-
-  } catch (error: any) {
-    console.error('Error in /api/meetings/transcribe:', error)
-    return NextResponse.json({ error: 'Erro interno no servidor.', details: error.message }, { status: 500 })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erro desconhecido.'
+    console.error('[meetings/transcribe] Error:', error)
+    return NextResponse.json({ error: 'Erro interno no servidor.', details: message }, { status: 500 })
   }
 }

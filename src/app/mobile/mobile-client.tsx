@@ -139,6 +139,7 @@ type Lead = {
   ai_score?: number | null
   cnpj?: string | null
   segmento_especifico?: string | null
+  client_id?: string | null
   company?: string | null
 }
 
@@ -208,14 +209,19 @@ function formatTime(s: number) { return `${Math.floor(s/60)}:${(s%60).toString()
 // ── FAB Semicircle (abre para cima em arco) ──────────────────────────────────
 function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => void }) {
   const [open, setOpen] = useState(false)
+  const [viewportWidth, setViewportWidth] = useState(390)
 
-  const N       = ALL_TABS.length  // 7 itens
-  const RADIUS  = 110             // raio do arco
+  useEffect(() => {
+    const updateWidth = () => setViewportWidth(window.innerWidth || 390)
+    updateWidth()
+    window.addEventListener('resize', updateWidth)
+    return () => window.removeEventListener('resize', updateWidth)
+  }, [])
+
   // Arco de 15° a 165° = semicírculo superior
-  const A_START = 15
-  const A_END   = 165
 
   const activeTab = ALL_TABS.find(t => t.id === active)
+  const arcRadius = Math.max(82, Math.min(112, (viewportWidth - 74) / 2))
 
   return (
     <>
@@ -230,6 +236,10 @@ function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => 
       {open && ALL_TABS.map((item, i) => {
         const isAct = active === item.id
         const Icon = item.icon
+        const total = ALL_TABS.length
+        const angle = (14 + (152 * i) / Math.max(1, total - 1)) * Math.PI / 180
+        const x = Math.cos(angle) * arcRadius
+        const y = Math.sin(angle) * arcRadius
 
         return (
           <button
@@ -240,39 +250,44 @@ function FABMenu({ active, onChange }: { active: TabId; onChange: (t: TabId) => 
             style={{
               position: 'fixed',
               left: '50%',
-              bottom: 190 + i * 58,
-              transform: 'translateX(-50%)',
-              width: 230,
-              minHeight: 48,
-              borderRadius: 14,
+              bottom: 150,
+              transform: `translate(${x - 26}px, ${-y}px)`,
+              width: 52,
+              height: 52,
+              borderRadius: '50%',
               background: isAct
                 ? `linear-gradient(135deg, ${item.color}88, ${item.color})`
                 : 'rgba(13,17,23,0.97)',
               border: `1px solid ${isAct ? item.color : item.color + '55'}`,
               display: 'flex',
-              flexDirection: 'row',
+              flexDirection: 'column',
               alignItems: 'center',
-              justifyContent: 'flex-start',
-              gap: 10,
-              padding: '0 14px',
+              justifyContent: 'center',
+              gap: 2,
+              padding: '6px 4px',
               cursor: 'pointer',
               boxShadow: isAct
                 ? `0 0 20px ${item.color}80, 0 4px 16px rgba(0,0,0,0.8)`
                 : `0 0 10px ${item.color}30, 0 4px 14px rgba(0,0,0,0.7)`,
-              animation: `fadeInUp 0.3s cubic-bezier(0.34,1.56,0.64,1) ${i * 0.03}s both`,
+              animation: `fadeInUp 0.28s cubic-bezier(0.34,1.56,0.64,1) ${i * 0.025}s both`,
               zIndex: 9998,
               WebkitTapHighlightColor: 'transparent',
+              boxSizing: 'border-box',
             }}
           >
             <Icon size={17} color={isAct ? '#0a0600' : item.color} strokeWidth={2.3} style={{ pointerEvents: 'none' }} />
             <span style={{
-              fontSize: '0.78rem',
+              fontSize: '0.43rem',
               fontWeight: 900,
               color: isAct ? '#0a0600' : item.color,
               textTransform: 'uppercase',
-              letterSpacing: '0.06em',
+              letterSpacing: 0,
               lineHeight: 1,
               pointerEvents: 'none',
+              maxWidth: 46,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}>
               {item.label}
             </span>
@@ -387,35 +402,54 @@ function MobileTabBar({ active, onChange }: { active: TabId; onChange: (tab: Tab
 }
 
 function NativeFABMenu({ active }: { active: TabId }) {
+  const [open, setOpen] = useState(false)
+  const [viewportWidth, setViewportWidth] = useState(390)
+
+  useEffect(() => {
+    const updateWidth = () => setViewportWidth(window.innerWidth || 390)
+    updateWidth()
+    window.addEventListener('resize', updateWidth)
+    window.addEventListener('orientationchange', updateWidth)
+    return () => {
+      window.removeEventListener('resize', updateWidth)
+      window.removeEventListener('orientationchange', updateWidth)
+    }
+  }, [])
+
   const activeTab = ALL_TABS.find(t => t.id === active)
+  const radius = Math.max(82, Math.min(116, (viewportWidth - 84) / 2))
+  const itemSize = radius < 96 ? 50 : 56
+  const labelFont = radius < 96 ? '0.39rem' : '0.43rem'
   return (
-    <details style={{ position: 'fixed', left: '50%', bottom: 112, transform: 'translateX(-50%)', zIndex: 10000, width: 62, height: 62 }}>
-      <summary style={{ width: 62, height: 62, borderRadius: '50%', background: 'linear-gradient(135deg, #92620a 0%, #d4970c 35%, #fbbf24 60%, #f0a500 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 0 40px rgba(251,191,36,0.55), 0 8px 32px rgba(0,0,0,0.7)', listStyle: 'none', WebkitTapHighlightColor: 'transparent' }}>
-        <Plus size={29} color="#0a0600" strokeWidth={2.5} />
-      </summary>
+    <div style={{ position: 'fixed', left: '50%', bottom: 'calc(104px + env(safe-area-inset-bottom, 0px))', transform: 'translateX(-50%)', zIndex: 10000, width: 64, height: 64, pointerEvents: 'none' }}>
+      {open && (
+        <button type="button" aria-label="Fechar menu" onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(1,4,9,0.18)', border: 0, padding: 0, pointerEvents: 'auto' }} />
+      )}
       {activeTab && (
-        <div style={{ position: 'fixed', bottom: 74, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.68)', padding: '4px 12px', borderRadius: 12, fontSize: '0.7rem', fontWeight: 700, color: activeTab.color, textTransform: 'uppercase', pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+        <div style={{ position: 'fixed', bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))', left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.68)', padding: '4px 12px', borderRadius: 12, fontSize: '0.7rem', fontWeight: 700, color: activeTab.color, textTransform: 'uppercase', pointerEvents: 'none', whiteSpace: 'nowrap' }}>
           {activeTab.label}
         </div>
       )}
-      <div style={{ position: 'absolute', left: 31, bottom: 76, width: 1, height: 1, pointerEvents: 'none' }}>
+      {open && <div style={{ position: 'absolute', left: 32, bottom: 78, width: 1, height: 1, pointerEvents: 'none' }}>
         {ALL_TABS.map((item, i) => {
           const Icon = item.icon
           const selected = active === item.id
           const total = ALL_TABS.length
-          const angle = (18 + (144 * i) / Math.max(1, total - 1)) * Math.PI / 180
-          const radius = 118
+          const angle = (20 + (140 * i) / Math.max(1, total - 1)) * Math.PI / 180
           const x = Math.cos(angle) * radius
           const y = Math.sin(angle) * radius
           return (
-            <a key={item.id} href={`?tab=${item.id}`} style={{ position: 'absolute', left: x - 28, bottom: y - 28, width: 56, height: 56, borderRadius: '50%', background: selected ? `linear-gradient(135deg, ${item.color}88, ${item.color})` : 'rgba(13,17,23,0.98)', border: `1.5px solid ${selected ? item.color : item.color + '66'}`, display: 'grid', placeItems: 'center', gap: 1, padding: '7px 4px', boxSizing: 'border-box', textDecoration: 'none', boxShadow: selected ? `0 0 20px ${item.color}70` : `0 0 12px ${item.color}25`, WebkitTapHighlightColor: 'transparent', pointerEvents: 'auto' }}>
+            <a key={item.id} href={`?tab=${item.id}`} onClick={() => setOpen(false)} style={{ position: 'absolute', left: x - itemSize / 2, bottom: y - itemSize / 2, width: itemSize, height: itemSize, borderRadius: '50%', background: selected ? `linear-gradient(135deg, ${item.color}88, ${item.color})` : 'rgba(13,17,23,0.98)', border: `1.5px solid ${selected ? item.color : item.color + '66'}`, display: 'grid', placeItems: 'center', gap: 1, padding: '6px 3px', boxSizing: 'border-box', textDecoration: 'none', boxShadow: selected ? `0 0 20px ${item.color}70` : `0 0 12px ${item.color}25`, WebkitTapHighlightColor: 'transparent', pointerEvents: 'auto' }}>
               <Icon size={17} color={selected ? '#0a0600' : item.color} strokeWidth={2.4} />
-              <span style={{ fontSize: '0.43rem', fontWeight: 900, color: selected ? '#0a0600' : item.color, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1, textAlign: 'center', maxWidth: 48, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+              <span style={{ fontSize: labelFont, fontWeight: 900, color: selected ? '#0a0600' : item.color, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1, textAlign: 'center', maxWidth: itemSize - 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
             </a>
           )
         })}
-      </div>
-    </details>
+      </div>}
+      <button type="button" aria-label={open ? 'Fechar menu mobile' : 'Abrir menu mobile'} onClick={() => setOpen((current) => !current)} style={{ position: 'absolute', left: 0, bottom: 0, width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, #92620a 0%, #d4970c 35%, #fbbf24 60%, #f0a500 100%)', border: '1px solid rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 0 40px rgba(251,191,36,0.55), 0 8px 32px rgba(0,0,0,0.7)', WebkitTapHighlightColor: 'transparent', pointerEvents: 'auto' }}>
+        <Plus size={29} color="#0a0600" strokeWidth={2.5} style={{ transform: open ? 'rotate(45deg)' : 'rotate(0deg)', transition: 'transform 160ms ease' }} />
+      </button>
+    </div>
   )
 }
 
@@ -1054,7 +1088,7 @@ function LogCallInline({ leads }: { leads: Lead[] }) {
         <option value="">Selecione o lead...</option>
         {active.map(l => <option key={l.id} value={l.id}>{l.name}{l.segmento_especifico ? ` — ${l.segmento_especifico}` : ''}</option>)}
       </select>
-      <textarea value={nota} onChange={e => setNota(e.target.value)} placeholder="O que foi discutido? Próximo passo?" rows={2} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', resize: 'none', boxSizing: 'border-box' }} />
+      <textarea value={nota} onChange={e => setNota(e.target.value)} placeholder="Pauta da ligacao, resumo e proximo passo" rows={3} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9, padding: '10px 12px', color: '#f0f6fc', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit', width: '100%', resize: 'none', boxSizing: 'border-box' }} />
       <button onClick={submit} disabled={isPending || !selectedId || !nota.trim()}
         style={{ padding: '11px', borderRadius: 10, background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.25)', color: '#38bdf8', fontWeight: 800, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         {isPending ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <Phone size={15} />}
@@ -1099,7 +1133,24 @@ function ContractInline({ leads, onDone }: { leads: Lead[]; onDone: () => void }
 
 // ── Voz IA ────────────────────────────────────────────────────────────────────
 type TriggerType = 'followup'|'reuniao'|'proposta'|'urgente'|'fechamento'|'nota'
-interface VoiceResult { transcription: string; trigger: TriggerType; triggerLabel: string; triggerEmoji: string; clientMessage: string; nextStep: string; saved: boolean }
+interface VoiceResult {
+  transcription: string
+  text?: string
+  summary?: string
+  pauta?: string | null
+  agenda?: string | null
+  nextSteps?: string[]
+  action_items?: string[]
+  suggestedActivityType?: string
+  trigger: TriggerType
+  triggerLabel: string
+  triggerEmoji: string
+  clientMessage: string
+  nextStep: string
+  saved: boolean
+  status?: 'saved' | 'not_saved_missing_relation' | 'not_saved_error' | 'not_saved_no_user'
+  activityId?: string | null
+}
 const TC: Record<TriggerType,{bg:string;border:string;text:string}> = {
   followup:   {bg:'rgba(56,189,248,0.07)',  border:'rgba(56,189,248,0.2)',  text:'#38bdf8'},
   reuniao:    {bg:'rgba(34,197,94,0.07)',   border:'rgba(34,197,94,0.2)',   text:'#22c55e'},
@@ -1155,16 +1206,24 @@ function VozView({ leads }: { leads: Lead[] }) {
         return
       }
       chRef.current=[]
-      const mt = MediaRecorder.isTypeSupported('audio/webm')?'audio/webm':'audio/ogg'
-      const mr = new MediaRecorder(stream,{mimeType:mt})
+      const supportedTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg;codecs=opus', 'audio/ogg']
+      const mt = supportedTypes.find((type) => MediaRecorder.isTypeSupported(type)) || ''
+      const mr = mt ? new MediaRecorder(stream,{mimeType:mt}) : new MediaRecorder(stream)
       mrRef.current=mr
       mr.ondataavailable=e=>{ if(e.data.size>0) chRef.current.push(e.data) }
       mr.onstop=async()=>{
         stream.getTracks().forEach(t=>t.stop())
-        const blob=new Blob(chRef.current,{type:mr.mimeType})
+        const mimeType = mr.mimeType || 'audio/webm'
+        const extension = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('aac') ? 'aac' : mimeType.includes('ogg') ? 'ogg' : 'webm'
+        const blob=new Blob(chRef.current,{type:mimeType})
         const form=new FormData()
-        form.append('audio',blob,'audio.webm')
-        if(lead){ form.append('leadId',lead.id); form.append('leadName',lead.name) }
+        form.append('audio',blob,`audio.${extension}`)
+        form.append('activityType','nota_audio')
+        if(lead){
+          form.append('leadId',lead.id)
+          form.append('leadName',lead.name)
+          if (lead.client_id) form.append('clientId', lead.client_id)
+        }
         try {
           const res=await fetch('/api/voice-note',{method:'POST',body:form})
           const data=await res.json() as VoiceResult&{error?:string}
@@ -1361,7 +1420,7 @@ function AgendaView({
         </select>
         <input type="datetime-local" value={scheduledFor} onChange={e => setScheduledFor(e.target.value)} style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:9,padding:'10px 12px',color:'#f0f6fc',fontSize:'0.85rem',outline:'none',fontFamily:'inherit',colorScheme:'dark'}} />
         <input value={location} onChange={e => setLocation(e.target.value)} placeholder="Local ou endereco" style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:9,padding:'10px 12px',color:'#f0f6fc',fontSize:'0.85rem',outline:'none',fontFamily:'inherit'}} />
-        <textarea value={objective} onChange={e => setObjective(e.target.value)} placeholder="Pauta / objetivo" rows={2} style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:9,padding:'10px 12px',color:'#f0f6fc',fontSize:'0.85rem',outline:'none',fontFamily:'inherit',resize:'none'}} />
+        <textarea value={objective} onChange={e => setObjective(e.target.value)} placeholder="Pauta da reuniao, resumo esperado e proximos passos" rows={3} style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:9,padding:'10px 12px',color:'#f0f6fc',fontSize:'0.85rem',outline:'none',fontFamily:'inherit',resize:'none'}} />
         <button onClick={submitMeeting} disabled={isPending || !leadId || !scheduledFor} style={{padding:'12px',borderRadius:10,background:'rgba(125,211,252,0.12)',border:'1px solid rgba(125,211,252,0.28)',color:'#7dd3fc',fontWeight:900,fontSize:'0.85rem',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
           {isPending ? <Loader2 size={15} style={{animation:'spin 1s linear infinite'}}/> : <CalendarDays size={15}/>}
           {isPending ? 'Agendando...' : 'Salvar reuniao'}
