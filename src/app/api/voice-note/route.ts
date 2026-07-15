@@ -102,8 +102,9 @@ function normalizeStringArray(value: unknown) {
 export async function POST(req: Request) {
   try {
     const groqKey = process.env.GROQ_API_KEY
-    if (!groqKey) {
-      return NextResponse.json({ error: 'Chave Groq nao configurada.' }, { status: 500 })
+    const openAiKey = process.env.OPENAI_API_KEY
+    if (!groqKey && !openAiKey) {
+      return NextResponse.json({ error: 'Configure GROQ_API_KEY ou OPENAI_API_KEY para transcrever audio.' }, { status: 500 })
     }
 
     let formData: FormData
@@ -127,15 +128,20 @@ export async function POST(req: Request) {
 
     const whisperForm = new FormData()
     whisperForm.append('file', audio, normalizedAudioFilename(audio))
-    whisperForm.append('model', 'whisper-large-v3-turbo')
+    whisperForm.append('model', groqKey ? 'whisper-large-v3-turbo' : 'whisper-1')
     whisperForm.append('language', 'pt')
-    whisperForm.append('response_format', 'text')
+    whisperForm.append('response_format', groqKey ? 'text' : 'json')
 
-    const whisperRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${groqKey}` },
-      body: whisperForm,
-    })
+    const whisperRes = await fetch(
+      groqKey
+        ? 'https://api.groq.com/openai/v1/audio/transcriptions'
+        : 'https://api.openai.com/v1/audio/transcriptions',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${groqKey || openAiKey}` },
+        body: whisperForm,
+      }
+    )
 
     if (!whisperRes.ok) {
       const err = await whisperRes.text()
@@ -143,7 +149,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Falha na transcricao de voz.', details: err }, { status: 502 })
     }
 
-    const transcription = (await whisperRes.text()).trim()
+    const transcription = groqKey
+      ? (await whisperRes.text()).trim()
+      : ((await whisperRes.json()) as { text?: string }).text?.trim() || ''
     if (!transcription) {
       return NextResponse.json({ error: 'Transcricao vazia. Nenhuma fala detectada.' }, { status: 422 })
     }
@@ -169,11 +177,17 @@ Regras:
 - clientMessage deve referenciar o contexto da conversa de forma natural
 - nextStep deve ser específico com prazo quando possível`
 
-    const llmRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const llmEndpoint = groqKey
+      ? 'https://api.groq.com/openai/v1/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions'
+    const llmModel = groqKey ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini'
+    const llmKey = groqKey || openAiKey
+
+    const llmRes = await fetch(llmEndpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${groqKey}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${llmKey}` },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: llmModel,
         messages: [{ role: 'user', content: analysisPrompt }],
         temperature: 0.4,
         max_tokens: 400,

@@ -43,6 +43,15 @@ type LogisticsPayload = {
   status?: string | null
 }
 
+function getMissingColumn(message?: string) {
+  if (!message) return null
+  return (
+    message.match(/'([^']+)' column/)?.[1] ||
+    message.match(/column "([^"]+)"/)?.[1] ||
+    null
+  )
+}
+
 async function getOwnerName(ownerId: string | null | undefined): Promise<string> {
   if (!ownerId) return 'Sem responsavel'
   try {
@@ -63,36 +72,55 @@ export async function createMeeting(payload: MeetingPayload) {
 
     const ownerName = await getOwnerName(ownerProfileId)
 
-    const { data: meetingData, error } = await supabase
-      .from('meetings')
-      .insert({
-        title: payload.title,
-        scheduled_for: payload.scheduled_for,
-        ends_at: payload.ends_at ?? null,
-        location: payload.location ?? null,
-        meeting_type: payload.meeting_type ?? 'Presencial',
-        status: payload.status ?? 'agendada',
-        lead_id: payload.lead_id ?? null,
-        lead_name: payload.lead_name ?? null,
-        company_name: payload.company_name ?? null,
-        client_id: payload.client_id ?? null,
-        deal_id: payload.deal_id ?? null,
-        contract_id: payload.contract_id ?? null,
-        objective: payload.objective ?? null,
-        notes: payload.notes ?? null,
-        agenda: payload.agenda ?? payload.objective ?? null,
-        summary: payload.summary ?? payload.notes ?? null,
-        next_step: payload.next_step ?? null,
-        next_contact_at: payload.next_contact_at ?? null,
-        owner_profile_id: ownerProfileId,
-        owner_name: ownerName,
-        requires_logistics: payload.requires_logistics ?? false,
-        event_id: payload.event_id ?? null,
-      })
-      .select('id')
-      .single()
+    let meetingPayload: Record<string, unknown> = {
+      title: payload.title,
+      scheduled_for: payload.scheduled_for,
+      ends_at: payload.ends_at ?? null,
+      location: payload.location ?? null,
+      meeting_type: payload.meeting_type ?? 'Presencial',
+      status: payload.status ?? 'agendada',
+      lead_id: payload.lead_id ?? null,
+      lead_name: payload.lead_name ?? null,
+      company_name: payload.company_name ?? null,
+      client_id: payload.client_id ?? null,
+      deal_id: payload.deal_id ?? null,
+      contract_id: payload.contract_id ?? null,
+      objective: payload.objective ?? null,
+      notes: payload.notes ?? null,
+      agenda: payload.agenda ?? payload.objective ?? null,
+      summary: payload.summary ?? payload.notes ?? null,
+      next_step: payload.next_step ?? null,
+      next_contact_at: payload.next_contact_at ?? null,
+      owner_profile_id: ownerProfileId,
+      owner_name: ownerName,
+      requires_logistics: payload.requires_logistics ?? false,
+      event_id: payload.event_id ?? null,
+    }
+
+    let meetingData: { id: string } | null = null
+    let error: { message: string } | null = null
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const result = await supabase
+        .from('meetings')
+        .insert(meetingPayload)
+        .select('id')
+        .single()
+
+      meetingData = result.data as { id: string } | null
+      error = result.error
+      if (!error) break
+
+      const missingColumn = getMissingColumn(error.message)
+      if (!missingColumn || !(missingColumn in meetingPayload)) break
+
+      const nextPayload = { ...meetingPayload }
+      delete nextPayload[missingColumn]
+      meetingPayload = nextPayload
+    }
 
     if (error) throw error
+    if (!meetingData?.id) throw new Error('Reuniao criada sem identificador.')
 
     const id = meetingData.id
 
