@@ -890,6 +890,7 @@ function NewLeadInlineFull({ clientes, onDone }: { clientes: ClienteOption[]; on
   const [cidade, setCidade] = useState('')
   const [atividade, setAtividade] = useState('')
   const [lookupData, setLookupData] = useState<CnpjLookupData | null>(null)
+  const [selectedCliente, setSelectedCliente] = useState<ClienteOption | null>(null)
   const [lookupLoading, setLookupLoading] = useState(false)
   const [isPending, start] = useTransition()
 
@@ -933,6 +934,11 @@ function NewLeadInlineFull({ clientes, onDone }: { clientes: ClienteOption[]; on
       return
     }
 
+    if (cnpj.replace(/\D/g, '').length !== 14) {
+      toast.error('Informe e consulte o CNPJ antes de salvar.')
+      return
+    }
+
     start(async () => {
       const displayName = nome.trim() || empresa.trim()
       const formattedCnpj = formatCnpj(cnpj)
@@ -944,6 +950,7 @@ function NewLeadInlineFull({ clientes, onDone }: { clientes: ClienteOption[]; on
         expected_value: Number(valor.replace(/\D/g, '')) || 0,
         stage: 'Contato Inicial',
         cnpj: formattedCnpj || undefined,
+        client_id: selectedCliente?.id || null,
         email: email.trim() || undefined,
         whatsapp: whats.trim() || undefined,
         segmento_especifico: atividade.trim() || cidade.trim() || undefined,
@@ -961,6 +968,7 @@ function NewLeadInlineFull({ clientes, onDone }: { clientes: ClienteOption[]; on
         setCidade('')
         setAtividade('')
         setLookupData(null)
+        setSelectedCliente(null)
       } else {
         toast.error(r.error || 'Erro ao criar lead')
       }
@@ -972,15 +980,16 @@ function NewLeadInlineFull({ clientes, onDone }: { clientes: ClienteOption[]; on
       <p style={{ fontSize: '0.6rem', fontWeight: 900, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Novo Lead</p>
       <ClientSearchField
         clientes={clientes}
-        selected={null}
+        selected={selectedCliente ? { id: selectedCliente.id, nome: selectedCliente.nome } : null}
         onSelect={(cliente) => {
+          setSelectedCliente(cliente)
           setNome(cliente.nome)
           setEmpresa(cliente.company_name || cliente.nome)
           setCnpj(formatCnpj(cliente.documento || ''))
           setEmail(cliente.email || '')
           setWhats(cliente.phone || '')
         }}
-        onClear={() => {}}
+        onClear={() => setSelectedCliente(null)}
         placeholder="Ja e cliente? Buscar cadastro"
       />
       <div style={{ display: 'flex', gap: 8 }}>
