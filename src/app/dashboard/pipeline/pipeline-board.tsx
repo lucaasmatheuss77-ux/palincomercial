@@ -1294,7 +1294,7 @@ export default function PipelineBoard({
       whatsapp: draftLead.whatsapp.trim(),
       email: draftLead.email.trim(),
       cnpj: formatCnpj(draftLead.cnpj),
-      client_id: result.lead?.client_id || draftLead.client_id || undefined,
+      client_id: draftLead.client_id || undefined,
       regime_tributario: draftLead.regime_tributario,
       faturamento_estimado: Number(draftLead.faturamento_estimado) || null,
       segmento_especifico: draftLead.segmento_especifico.trim(),

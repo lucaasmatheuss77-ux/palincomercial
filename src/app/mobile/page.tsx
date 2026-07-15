@@ -113,7 +113,7 @@ export default async function PocketCRMPage({ searchParams }: { searchParams?: M
     const client = clientByLead.get(lead.id)
     return {
       ...lead,
-      client_id: client?.id ?? lead.client_id ?? null,
+      client_id: client?.id ?? null,
       cnpj: lead.cnpj ?? client?.documento ?? null,
       company: lead.company ?? client?.company_name ?? null,
       email: lead.email ?? client?.email ?? null,

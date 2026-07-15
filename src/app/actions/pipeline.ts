@@ -20,7 +20,6 @@ type PipelineLeadRecord = {
   name: string
   company_name?: string | null
   company?: string | null
-  client_id?: string | null
   cnpj?: string | null
   cnpj_cpf?: string | null
   consultant_id?: string | null
@@ -199,7 +198,7 @@ export async function updateLeadStage(leadId: string, newStage: string) {
         existingDeal,
         {
           lead: leadSnapshot,
-          clientId: clientSnapshot?.id || (leadSnapshot as { client_id?: string | null } | null)?.client_id || null,
+          clientId: clientSnapshot?.id || null,
           contractFields: { status: 'ativo', signed_at: new Date().toISOString() },
         }
       )
@@ -208,7 +207,7 @@ export async function updateLeadStage(leadId: string, newStage: string) {
         await recordCommercialActivity({
           leadId,
           dealId: existingDeal.id,
-          clientId: clientSnapshot?.id || (leadSnapshot as { client_id?: string | null } | null)?.client_id || null,
+          clientId: clientSnapshot?.id || null,
           contractId: contract.id,
           consultantId: existingDeal.consultant_id ?? null,
           activityType: 'fechamento',
@@ -233,7 +232,7 @@ export async function updateLeadStage(leadId: string, newStage: string) {
         if (deal) {
           const contract = await upsertPendingContractFromDeal(supabase, deal, {
             lead,
-            clientId: clientSnapshot?.id || (lead as { client_id?: string | null } | null)?.client_id || null,
+            clientId: clientSnapshot?.id || null,
             contractFields: { status: 'ativo', signed_at: new Date().toISOString() },
           })
 
@@ -241,7 +240,7 @@ export async function updateLeadStage(leadId: string, newStage: string) {
             await recordCommercialActivity({
               leadId: lead.id,
               dealId: deal.id,
-              clientId: clientSnapshot?.id || (lead as { client_id?: string | null } | null)?.client_id || null,
+              clientId: clientSnapshot?.id || null,
               contractId: contract.id,
               consultantId: deal.consultant_id ?? null,
               activityType: 'fechamento',
@@ -344,7 +343,6 @@ export async function createLead(data: {
     phone: data.phone || null,
     whatsapp: data.whatsapp || null,
     email: data.email || null,
-    client_id: data.client_id || null,
     cnpj_cpf: document,
     regime_tributario: data.regime_tributario || null,
     faturamento_estimado: data.faturamento_estimado || null,
@@ -381,6 +379,13 @@ export async function createLead(data: {
   }
 
   if (lead?.id) {
+    if (data.client_id) {
+      await supabase
+        .from('clientes')
+        .update({ origin_lead_id: lead.id, updated_at: new Date().toISOString() })
+        .eq('id', data.client_id)
+    }
+
     await createStageEvent(supabase, { leadId: lead.id, toStage: data.stage })
     await upsertAiQualification(supabase, {
       leadId: lead.id,
@@ -444,15 +449,15 @@ export async function updateLead(leadId: string, data: {
   // if (!user) return { success: false, error: 'Nao autorizado.' }
 
   const { ai_status, ai_score, ai_source, ai_summary, cnpj, regime_tributario, faturamento_estimado, segmento_especifico, ...leadData } = data
-  const { data: currentLeadForDocument } = await supabase
-    .from('leads')
-    .select('client_id')
-    .eq('id', leadId)
+  const { data: currentClientForLead } = await supabase
+    .from('clientes')
+    .select('id')
+    .eq('origin_lead_id', leadId)
     .maybeSingle()
 
   const document = normalizeDocument(cnpj)
   if (document) {
-    const duplicate = await findExistingDocumentOwner(supabase, document, leadId, currentLeadForDocument?.client_id ?? null)
+    const duplicate = await findExistingDocumentOwner(supabase, document, leadId, currentClientForLead?.id ?? null)
     if (duplicate.error) return { success: false, error: duplicate.error }
     if (duplicate.owner) {
       return { success: false, error: `Documento já cadastrado para ${duplicate.owner}. Não é permitido duplicar CNPJ/CPF.` }

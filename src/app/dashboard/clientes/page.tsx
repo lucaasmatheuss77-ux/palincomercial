@@ -29,6 +29,7 @@ type LeadRecord = {
   id: string
   name: string
   company: string | null
+  cnpj: string | null
   email: string | null
   phone: string | null
   whatsapp: string | null
@@ -328,7 +329,7 @@ export default async function ClientesPage({
   try {
     const queryResults = await Promise.allSettled([
       supabase.from('clientes').select('*').order('updated_at', { ascending: false }),
-      supabase.from('leads').select('id, name, company, email, phone, whatsapp, created_at').limit(10000),
+      supabase.from('leads').select('id, name, company:company_name, cnpj:cnpj_cpf, email, phone, whatsapp, created_at').limit(10000),
       supabase.from('contracts').select(
         'id, deal_id, lead_id, client_id, product_id, consultant_id, contract_number, status, value, start_date, end_date, signed_at, notes, pdf_bucket, pdf_path, pdf_file_name, pdf_mime_type, pdf_uploaded_at, cancellation_reason, created_at, updated_at'
       ),
@@ -520,7 +521,7 @@ export default async function ClientesPage({
       email: client.email || lead?.email || '',
       phone: client.phone || lead?.phone || '',
       whatsapp: client.whatsapp || lead?.whatsapp || '',
-      document: client.documento || '',
+      document: client.documento || lead?.cnpj || '',
       segmento: client.segmento || '',
       cidade: client.cidade || '',
       estado: client.estado || '',

@@ -95,8 +95,8 @@ export default async function PipelinePage({
       .from('leads')
       .select(`
         id, name, company_name, stage, expected_value, created_at, notas,
-        phone, whatsapp, email, cnpj, regime_tributario, faturamento_estimado, segmento_especifico,
-        product_id, consultant_id, client_id,
+        phone, whatsapp, email, cnpj:cnpj_cpf, segmento_especifico,
+        product_id, consultant_id,
         product:products(id, name),
         consultant:profiles!consultant_id(id, full_name)
       `)
@@ -209,7 +209,6 @@ export default async function PipelinePage({
     updated_at: string | null
   }>
   const clientRecords = ((clientsResult.error ? [] : clientsResult.data) || []) as ClientRecord[]
-  const clientById = new Map(clientRecords.map((client) => [client.id, client]))
   const clientByLead = clientRecords.reduce<Map<string, ClientRecord>>((acc, client) => {
     if (client.origin_lead_id) acc.set(client.origin_lead_id, client)
     return acc
@@ -381,7 +380,6 @@ export default async function PipelinePage({
     notas: string | null
     product_id: string | null
     consultant_id: string | null
-    client_id?: string | null
     stage: string
     product?: Array<{ name: string | null }>
     consultant?: Array<{ full_name: string | null }>
@@ -410,8 +408,8 @@ export default async function PipelinePage({
     const ai = aiByLead.get(lead.id) as AiQualificationRow | undefined
     const aiUpdatedAt = ai?.updated_at || null
     const aiFreshnessMinutes = aiUpdatedAt ? Math.max(0, Math.floor((Date.now() - new Date(aiUpdatedAt).getTime()) / (1000 * 60))) : null
-    const client = clientByLead.get(lead.id) || (lead.client_id ? clientById.get(lead.client_id) : null) || null
-    const clientId = lead.client_id || client?.id || null
+    const client = clientByLead.get(lead.id) || null
+    const clientId = client?.id || null
     const contract = contractByLead.get(lead.id) || (clientId ? contractByClient.get(clientId) : undefined)
     const contractInfo = classifyClientStatus(contract, client?.status_cliente)
 

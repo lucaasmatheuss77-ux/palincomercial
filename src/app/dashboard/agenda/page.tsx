@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { listClienteOptions } from '@/app/actions/clientes'
 import AgendaManager from './agenda-manager'
-import type { AgendaLeadOption, AgendaLogisticsItem, AgendaMeeting, AgendaProfile, AgendaTask } from './agenda-types'
+import type { AgendaLogisticsItem, AgendaMeeting, AgendaProfile, AgendaTask } from './agenda-types'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,15 +10,9 @@ type ProfileRecord = {
   full_name: string | null
 }
 
-type LeadRecord = {
-  id: string
-  name: string | null
-  company: string | null
-  client_id: string | null
-}
-
 type ClientRecord = {
   id: string
+  origin_lead_id: string | null
   name: string | null
   company_name: string | null
 }
@@ -68,15 +62,13 @@ export default async function AgendaPage() {
 
   const [
     { data: profilesData },
-    { data: leadsData },
     { data: clientsData },
     { data: meetingsData },
     { data: tasksData },
     { data: logisticsData },
   ] = await Promise.all([
     supabase.from('profiles').select('id, full_name').order('full_name'),
-    supabase.from('leads').select('id, name, company, client_id').order('created_at', { ascending: false }).limit(10000),
-    supabase.from('clientes').select('id, name, company_name').order('updated_at', { ascending: false }),
+    supabase.from('clientes').select('id, origin_lead_id, name, company_name').order('updated_at', { ascending: false }),
     supabase.from('meetings').select('id, title, scheduled_for, ends_at, location, meeting_type, status, objective, notes, lead_id, client_id, lead_name, company_name, next_step, next_contact_at, owner_profile_id, owner_name, requires_logistics').order('scheduled_for', { ascending: true }),
     supabase.from('meeting_tasks').select('id, meeting_id, title, due_at, priority, status, owner_profile_id, owner_name').order('due_at', { ascending: true }),
     supabase.from('meeting_logistics').select('id, meeting_id, title, detail, status').order('created_at', { ascending: true }),
@@ -87,15 +79,13 @@ export default async function AgendaPage() {
     full_name: p.full_name || 'Usuario',
   }))
 
-  const leads: AgendaLeadOption[] = (leadsData || []).map((lead: LeadRecord) => ({
-    id: lead.id,
-    label: lead.company ? `${lead.name} - ${lead.company}` : lead.name || 'Lead sem nome',
-  }))
-
   const clientsById = new Map((clientsData || []).map((client: ClientRecord) => [
     client.id,
     client.company_name ? `${client.name} - ${client.company_name}` : client.name || 'Cliente sem nome',
   ]))
+  const clientIdByLeadId = new Map((clientsData || [])
+    .filter((client: ClientRecord) => client.origin_lead_id)
+    .map((client: ClientRecord) => [client.origin_lead_id as string, client.id]))
 
   const meetings: AgendaMeeting[] = (meetingsData || []).map((row: MeetingRecord) => ({
     id: row.id,
@@ -108,7 +98,7 @@ export default async function AgendaPage() {
     objective: row.objective,
     notes: row.notes,
     lead_id: row.lead_id,
-    client_id: row.client_id || (row.lead_id ? (leadsData as LeadRecord[] || []).find((lead) => lead.id === row.lead_id)?.client_id || null : null),
+    client_id: row.client_id || (row.lead_id ? clientIdByLeadId.get(row.lead_id) || null : null),
     lead_name: row.lead_name,
     company_name: row.company_name,
     client_name: row.client_id ? clientsById.get(row.client_id) || null : null,

@@ -11,6 +11,7 @@ export type LeadSnapshot = {
   id: string
   name: string
   company?: string | null
+  company_name?: string | null
   product_id?: string | null
   consultant_id?: string | null
   estimated_value?: number | string | null
@@ -19,6 +20,7 @@ export type LeadSnapshot = {
   whatsapp?: string | null
   email?: string | null
   cnpj?: string | null
+  cnpj_cpf?: string | null
   client_id?: string | null
 }
 
@@ -264,12 +266,20 @@ function normalizeCrmStage(stage?: string | null) {
   return CRM_STAGES.includes(text as (typeof CRM_STAGES)[number]) ? text : null
 }
 
+function getLeadCompany(lead: LeadSnapshot) {
+  return textOrNull(lead.company_name) ?? textOrNull(lead.company)
+}
+
+function getLeadDocument(lead: LeadSnapshot) {
+  return normalizeDocument(lead.cnpj_cpf) ?? normalizeDocument(lead.cnpj)
+}
+
 function buildClientPayload(lead: LeadSnapshot, currentClient?: Partial<ClientRecord> | null, desiredStatus?: string | null) {
   return {
     origin_lead_id: currentClient?.origin_lead_id ?? lead.id,
     name: textOrNull(lead.name) || currentClient?.name || 'Sem nome',
-    company_name: textOrNull(lead.company) ?? currentClient?.company_name ?? null,
-    documento: normalizeDocument(lead.cnpj) ?? currentClient?.documento ?? null,
+    company_name: getLeadCompany(lead) ?? currentClient?.company_name ?? null,
+    documento: getLeadDocument(lead) ?? currentClient?.documento ?? null,
     email: textOrNull(lead.email) ?? currentClient?.email ?? null,
     phone: textOrNull(lead.phone) ?? currentClient?.phone ?? null,
     whatsapp: textOrNull(lead.whatsapp) ?? currentClient?.whatsapp ?? null,
@@ -328,12 +338,12 @@ async function syncLeadClientLink(supabase: SupabaseServerClient, leadId: string
   if (!clientId) return
 
   const { error } = await supabase
-    .from('leads')
-    .update({ client_id: clientId, updated_at: nowIso() })
-    .eq('id', leadId)
+    .from('clientes')
+    .update({ origin_lead_id: leadId, updated_at: nowIso() })
+    .eq('id', clientId)
 
   if (error) {
-    console.warn('Vinculo lead -> cliente indisponivel:', error.message)
+    console.warn('Vinculo cliente -> lead indisponivel:', error.message)
   }
 }
 
@@ -353,6 +363,9 @@ async function getClientByOriginLeadId(supabase: SupabaseServerClient, leadId: s
 }
 
 async function getClientForLead(supabase: SupabaseServerClient, lead: LeadSnapshot) {
+  const byOrigin = await getClientByOriginLeadId(supabase, lead.id)
+  if (byOrigin) return byOrigin
+
   if (lead.client_id) {
     const { data, error } = await supabase
       .from('clientes')
@@ -368,10 +381,7 @@ async function getClientForLead(supabase: SupabaseServerClient, lead: LeadSnapsh
     if (data) return data as ClientRecord
   }
 
-  const byOrigin = await getClientByOriginLeadId(supabase, lead.id)
-  if (byOrigin) return byOrigin
-
-  const document = normalizeDocument(lead.cnpj)
+  const document = getLeadDocument(lead)
   if (document) {
     const { data, error } = await supabase
       .from('clientes')
@@ -736,6 +746,7 @@ export async function createClientRecord(
     phone: textOrNull(data.phone),
     whatsapp: textOrNull(data.whatsapp),
     email,
+    cnpj_cpf: document,
     created_at: nowIso(),
   }
 
