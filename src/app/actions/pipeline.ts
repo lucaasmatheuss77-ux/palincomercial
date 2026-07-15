@@ -22,6 +22,7 @@ type PipelineLeadRecord = {
   company?: string | null
   client_id?: string | null
   cnpj?: string | null
+  cnpj_cpf?: string | null
   consultant_id?: string | null
   email?: string | null
   phone?: string | null
@@ -71,15 +72,15 @@ async function findExistingDocumentOwner(supabase: SupabaseServerClient, documen
 
   const { data: leads, error: leadsError } = await supabase
     .from('leads')
-    .select('id, name, company_name, cnpj, client_id')
-    .in('cnpj', [document, formatDocument(document)])
+    .select('id, name, company_name, cnpj_cpf')
+    .in('cnpj_cpf', [document, formatDocument(document)])
     .limit(2)
 
   if (leadsError && !/does not exist|column|schema cache/i.test(leadsError.message)) {
     return { error: leadsError.message }
   }
 
-  const lead = (leads || []).find((item) => item.id !== ignoreLeadId && item.client_id !== ignoreClientId)
+  const lead = (leads || []).find((item) => item.id !== ignoreLeadId)
   if (lead) {
     return { owner: lead.company_name || lead.name || 'lead cadastrado' }
   }
@@ -344,7 +345,7 @@ export async function createLead(data: {
     whatsapp: data.whatsapp || null,
     email: data.email || null,
     client_id: data.client_id || null,
-    cnpj: document,
+    cnpj_cpf: document,
     regime_tributario: data.regime_tributario || null,
     faturamento_estimado: data.faturamento_estimado || null,
     segmento_especifico: data.segmento_especifico || null,
@@ -460,7 +461,7 @@ export async function updateLead(leadId: string, data: {
 
   let updatePayload: Record<string, unknown> = {
     ...leadData,
-    cnpj: document,
+    cnpj_cpf: document,
     regime_tributario: regime_tributario || null,
     faturamento_estimado: faturamento_estimado || null,
     segmento_especifico: segmento_especifico || null,

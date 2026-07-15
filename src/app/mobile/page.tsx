@@ -9,8 +9,36 @@ type MobileSearchParams = {
   leadId?: string | string[]
 }
 
+type MobileLeadRow = {
+  id: string
+  name: string
+  stage?: string | null
+  whatsapp?: string | null
+  email?: string | null
+  expected_value?: number | string | null
+  created_at?: string | null
+  segmento_especifico?: string | null
+  cnpj?: string | null
+  company?: string | null
+  client_id?: string | null
+}
+
+type MobileClientRow = {
+  id: string
+  origin_lead_id?: string | null
+  documento?: string | null
+  company_name?: string | null
+  email?: string | null
+  phone?: string | null
+  whatsapp?: string | null
+}
+
 function getParam(value?: string | string[]) {
   return Array.isArray(value) ? value[0] || '' : value || ''
+}
+
+function isUuid(value?: string | null) {
+  return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
 }
 
 export default async function PocketCRMPage({ searchParams }: { searchParams?: MobileSearchParams | Promise<MobileSearchParams> } = {}) {
@@ -25,33 +53,49 @@ export default async function PocketCRMPage({ searchParams }: { searchParams?: M
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
   const todayEnd   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString()
+  const userId = isUuid(currentUser.id) ? currentUser.id : null
+  let agendaQuery = supabase
+    .from('meetings')
+    .select('id, title, scheduled_for, client_name:lead_name, location')
+    .gte('scheduled_for', new Date().toISOString())
+    .order('scheduled_for', { ascending: true })
+    .limit(8)
 
-  const [leadsRes, agendaRes, meetingsTodayRes, overdueRes, profileRes] = await Promise.allSettled([
+  if (userId) {
+    agendaQuery = agendaQuery.eq('owner_profile_id', userId)
+  }
+
+  let meetingsTodayQuery = supabase
+    .from('meetings')
+    .select('id')
+    .gte('scheduled_for', todayStart)
+    .lte('scheduled_for', todayEnd)
+
+  if (userId) {
+    meetingsTodayQuery = meetingsTodayQuery.eq('owner_profile_id', userId)
+  }
+
+  const [leadsRes, clientLinksRes, agendaRes, meetingsTodayRes, overdueRes, profileRes] = await Promise.allSettled([
     supabase
       .from('leads')
-      .select('id, name, stage, whatsapp, expected_value, created_at, segmento_especifico, client_id, company:company_name')
+      .select('id, name, stage, whatsapp, email, expected_value, created_at, segmento_especifico, cnpj:cnpj_cpf, company:company_name')
       .order('updated_at', { ascending: false })
       .limit(10000),
 
     supabase
-      .from('meetings')
-      .select('id, title, scheduled_for, client_name:lead_name, location')
-      .eq('owner_profile_id', currentUser.id)
-      .gte('scheduled_for', new Date().toISOString())
-      .order('scheduled_for', { ascending: true })
-      .limit(5),
+      .from('clientes')
+      .select('id, origin_lead_id, documento, company_name, email, phone, whatsapp')
+      .not('origin_lead_id', 'is', null)
+      .limit(10000),
 
-    supabase
-      .from('meetings')
-      .select('id')
-      .eq('owner_profile_id', currentUser.id)
-      .gte('scheduled_for', todayStart)
-      .lte('scheduled_for', todayEnd),
+    agendaQuery,
+
+    meetingsTodayQuery,
 
     supabase
       .from('commercial_activities')
       .select('id')
-      .eq('consultant_id', currentUser.id)
+      .eq('consultant_id', userId || '00000000-0000-0000-0000-000000000000')
       .lt('next_contact_at', now.toISOString())
       .neq('status', 'concluida'),
 
@@ -62,7 +106,20 @@ export default async function PocketCRMPage({ searchParams }: { searchParams?: M
       .maybeSingle(),
   ])
 
-  const leads         = leadsRes.status === 'fulfilled' ? (leadsRes.value.data ?? []) : []
+  const rawLeads      = leadsRes.status === 'fulfilled' ? ((leadsRes.value.data ?? []) as MobileLeadRow[]) : []
+  const clientLinks   = clientLinksRes.status === 'fulfilled' ? ((clientLinksRes.value.data ?? []) as MobileClientRow[]) : []
+  const clientByLead  = new Map(clientLinks.filter(client => client.origin_lead_id).map(client => [client.origin_lead_id as string, client]))
+  const leads         = rawLeads.map((lead) => {
+    const client = clientByLead.get(lead.id)
+    return {
+      ...lead,
+      client_id: client?.id ?? lead.client_id ?? null,
+      cnpj: lead.cnpj ?? client?.documento ?? null,
+      company: lead.company ?? client?.company_name ?? null,
+      email: lead.email ?? client?.email ?? null,
+      whatsapp: lead.whatsapp ?? client?.whatsapp ?? client?.phone ?? null,
+    }
+  })
   const agenda        = agendaRes.status === 'fulfilled' ? (agendaRes.value.data ?? []) : []
   const meetingsToday = meetingsTodayRes.status === 'fulfilled' ? (meetingsTodayRes.value.data ?? []) : []
   const overdue       = overdueRes.status === 'fulfilled' ? (overdueRes.value.data ?? []) : []
